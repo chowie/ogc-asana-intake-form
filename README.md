@@ -81,7 +81,7 @@ npm test            # single run
 npm run test:watch  # watch mode
 ```
 
-Tests use Vitest + Testing Library. 34 tests across three files:
+Tests use Vitest + Testing Library. 36 tests across three files:
 
 - **`PassphraseGate.test.jsx`** — renders correctly, calls `onAuthenticated` on correct passphrase, shows error on wrong passphrase, clears error on re-type
 - **`IntakeForm.test.jsx`** — email auto-fill from staff selection, validation errors on empty required fields, correct `onSubmit` payload, frozen/submitting/apiError prop states
@@ -126,7 +126,7 @@ The deacon roster (names, emails, Asana GIDs) lives in a Notion database. During
 1. Go to [notion.so/my-integrations](https://www.notion.so/my-integrations) and create an internal integration with read-only access
 2. Share the roster database with the integration
 3. Copy the integration token → `NOTION_TOKEN` env var
-4. Copy the database ID from the database URL → `NOTION_ROSTER_DB_ID` env var
+4. Copy the database ID from the database URL → `NOTION_ROSTER_DB_ID` env var (open the database as a full page; the ID is the 32-character hex string before `?v=` in the URL)
 
 **Triggering a rebuild when the roster changes:**
 
@@ -134,7 +134,7 @@ Create a Netlify build hook: **Site configuration → Build & deploy → Build h
 
 For a manual refresh without a code push:
 ```bash
-npm run refresh-roster   # regenerates data/roster.json locally
+node --env-file=.env scripts/fetch-roster.mjs   # regenerates data/roster.json locally
 ```
 
 If `NOTION_TOKEN` or `NOTION_ROSTER_DB_ID` are not set, the script exits cleanly and the build continues with the committed placeholder `data/roster.json`.
