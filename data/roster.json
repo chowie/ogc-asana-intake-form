@@ -1,0 +1,5 @@
+[
+  { "name": "Example Staff 1", "email": "staff1@example.com", "asanaGid": "0000000000000001" },
+  { "name": "Example Staff 2", "email": "staff2@example.com", "asanaGid": "0000000000000002" },
+  { "name": "Example Staff 3", "email": "staff3@example.com", "asanaGid": "0000000000000003" }
+]

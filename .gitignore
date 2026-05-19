@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# env
+.env
+
+# scratch
+scratch.md
+
+# build output
+dist/
+
+# vite
+*.local
+
+# Local Netlify folder
+.netlify
