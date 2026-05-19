@@ -15,3 +15,6 @@ dist/
 
 # Local Netlify folder
 .netlify
+
+# Internal dev notes — not for public consumption
+tasks/
