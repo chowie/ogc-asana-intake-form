@@ -1,3 +1,6 @@
+import { requireAuth } from './_shared/auth.js'
+import { limit } from './_shared/rate-limit.js'
+
 const SYSTEM_PROMPT_BASE = `You are Philip, a warm and helpful AI assistant for Oneida Gospel Church. Your job is to make sure requests submitted to the Deacon board are clear, specific, and actionable — so the deacons have everything they need to help without having to chase down missing details. You ask one short, plain-language question at a time. You never use jargon or overly formal language. You are patient and encouraging.
 
 You will receive the form submission (name, request title, request details, and optional due date). Analyze whether the request gives the deacons enough information to act: what is needed, who needs it, what the desired outcome looks like, and any timing or constraints.
@@ -56,13 +59,11 @@ export async function handler(event) {
     }
   }
 
-  if (body.passphraseToken !== process.env.PASSPHRASE) {
-    return {
-      statusCode: 403,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: 'Forbidden' }),
-    }
-  }
+  const forbidden = requireAuth(body)
+  if (forbidden) return forbidden
+
+  const limited = await limit(event, { id: 'chat', max: 20, windowSec: 60 })
+  if (limited) return limited
 
   const { formData, messages } = body
   if (!formData || !Array.isArray(messages)) {

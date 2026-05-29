@@ -1,3 +1,5 @@
+import { requireAuth } from './_shared/auth.js'
+
 const ASANA_BASE = 'https://app.asana.com/api/1.0'
 
 export async function handler(event) {
@@ -16,13 +18,8 @@ export async function handler(event) {
     }
   }
 
-  if (body.passphraseToken !== process.env.PASSPHRASE) {
-    return {
-      statusCode: 403,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: 'Forbidden' }),
-    }
-  }
+  const forbidden = requireAuth(body)
+  if (forbidden) return forbidden
 
   const { taskGid, fileName, mimeType, fileData } = body
   if (!taskGid || !fileName || !fileData) {

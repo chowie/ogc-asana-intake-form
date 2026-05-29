@@ -45,7 +45,10 @@ Copy `.env.example` to `.env`. All vars are server-side only (no `VITE_` prefix 
 
 | Variable | Description |
 |---|---|
-| `PASSPHRASE` | Shared passphrase shown before the form |
+| `PASSPHRASE` | Shared passphrase shown before the form (read only by `verify-passphrase`) |
+| `AUTH_SECRET` | HMAC secret for signing session tokens issued by `verify-passphrase` |
+| `UPSTASH_REDIS_REST_URL` | Upstash Redis REST URL — backs per-IP rate limiting (skipped if unset) |
+| `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis REST token |
 | `ASANA_PAT` | Asana Personal Access Token |
 | `ASANA_PROJECT_GID` | GID of the "OGC Deacons" Asana project |
 | `ASANA_INBOX_SECTION_GID` | GID of the "Inbox" section in that project |
@@ -55,4 +58,4 @@ Copy `.env.example` to `.env`. All vars are server-side only (no `VITE_` prefix 
 
 ## Deployment
 
-Deployed to Netlify. The `netlify.toml` handles build config, functions directory, and SPA redirect. All seven env vars must be set in Netlify's **Site Settings → Environment variables**. The build command runs `scripts/fetch-roster.mjs` before Vite to bake the live roster into the bundle.
+Deployed to Netlify. The `netlify.toml` handles build config, functions directory, and SPA redirect. All ten env vars must be set in Netlify's **Site Settings → Environment variables** (the two `UPSTASH_*` vars are optional — rate limiting is skipped if absent). The build command runs `scripts/fetch-roster.mjs` before Vite to bake the live roster into the bundle.
