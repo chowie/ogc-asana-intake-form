@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "refresh-roster": "node scripts/fetch-roster.mjs"
+    "refresh-roster": "node scripts/fetch-roster.mjs",
+    "gen-secret": "node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\""
   },
   "dependencies": {
     "@upstash/ratelimit": "^2.0.8",
