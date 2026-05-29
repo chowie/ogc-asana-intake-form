@@ -26,22 +26,30 @@ if (!NOTION_TOKEN || !NOTION_ROSTER_DB_ID) {
 }
 
 try {
-  const res = await fetch(`https://api.notion.com/v1/databases/${NOTION_ROSTER_DB_ID}/query`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${NOTION_TOKEN}`,
-      'Notion-Version': '2022-06-28',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({}),
-  })
+  // Notion returns at most 100 rows per request — page through all of them so
+  // active deacons beyond row 100 aren't silently dropped.
+  const results = []
+  let cursor
+  do {
+    const res = await fetch(`https://api.notion.com/v1/databases/${NOTION_ROSTER_DB_ID}/query`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${NOTION_TOKEN}`,
+        'Notion-Version': '2022-06-28',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(cursor ? { start_cursor: cursor } : {}),
+    })
 
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`Notion API responded ${res.status}: ${text}`)
-  }
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`Notion API responded ${res.status}: ${text}`)
+    }
 
-  const { results } = await res.json()
+    const page = await res.json()
+    results.push(...page.results)
+    cursor = page.has_more ? page.next_cursor : undefined
+  } while (cursor)
 
   const roster = results
     .filter((page) => {
