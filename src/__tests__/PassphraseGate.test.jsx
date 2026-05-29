@@ -83,7 +83,7 @@ describe('PassphraseGate', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
-  it('shows an error when the network call fails', async () => {
+  it('shows an error when the server responds with !ok', async () => {
     vi.stubGlobal('fetch', mockFetchError())
     render(<PassphraseGate onAuthenticated={vi.fn()} />)
 
@@ -91,6 +91,18 @@ describe('PassphraseGate', () => {
     await userEvent.click(screen.getByRole('button', { name: /enter/i }))
 
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+  })
+
+  it('shows an error when fetch rejects (true network failure)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+    const onAuthenticated = vi.fn()
+    render(<PassphraseGate onAuthenticated={onAuthenticated} />)
+
+    await userEvent.type(screen.getByLabelText(/passphrase/i), 'any-input')
+    await userEvent.click(screen.getByRole('button', { name: /enter/i }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    expect(onAuthenticated).not.toHaveBeenCalled()
   })
 
   it('disables the button while checking', async () => {
