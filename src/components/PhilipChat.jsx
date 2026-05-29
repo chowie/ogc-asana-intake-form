@@ -48,7 +48,7 @@ function TypingIndicator() {
   )
 }
 
-function SummaryBlock({ summary, onConfirm, onEdit }) {
+function SummaryBlock({ summary, onConfirm, onEdit, awaitingConfirm }) {
   const rows = [
     { label: 'What', value: summary.what },
     { label: 'Context', value: summary.context },
@@ -77,16 +77,18 @@ function SummaryBlock({ summary, onConfirm, onEdit }) {
           <button
             type="button"
             onClick={onEdit}
-            className="px-4 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            disabled={awaitingConfirm}
+            className="px-4 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Edit my request
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="px-4 py-1.5 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+            disabled={awaitingConfirm}
+            className="px-4 py-1.5 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            Confirm &amp; send
+            {awaitingConfirm ? 'Sending…' : 'Confirm & send'}
           </button>
         </div>
       </div>
@@ -102,6 +104,7 @@ export default function PhilipChat({
   awaitingAI,
   showSummary,
   summary,
+  awaitingConfirm,
   onConfirm,
   onEdit,
 }) {
@@ -167,7 +170,23 @@ export default function PhilipChat({
 
           {awaitingAI && <TypingIndicator />}
           {showSummary && summary && (
-            <SummaryBlock summary={summary} onConfirm={onConfirm} onEdit={onEdit} />
+            <SummaryBlock summary={summary} onConfirm={onConfirm} onEdit={onEdit} awaitingConfirm={awaitingConfirm} />
+          )}
+          {showSummary && !summary && (
+            <div className="flex items-start" data-testid="summary-error">
+              <div className="w-full px-4 py-3 text-sm bg-amber-50 border border-amber-200 rounded-xl rounded-tl-[4px]">
+                <p className="text-gray-800">
+                  Something went wrong putting your summary together. Your request hasn&rsquo;t been sent yet.
+                </p>
+                <button
+                  type="button"
+                  onClick={onEdit}
+                  className="mt-3 px-4 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Edit my request
+                </button>
+              </div>
+            </div>
           )}
         </div>
 

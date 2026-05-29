@@ -1,3 +1,5 @@
+import { getAuthToken } from './auth.js'
+
 function readFileAsBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -8,7 +10,7 @@ function readFileAsBase64(file) {
 }
 
 export async function attachFile({ taskGid, file }) {
-  const passphraseToken = JSON.parse(localStorage.getItem('ogc_auth') ?? 'null')?.token ?? ''
+  const passphraseToken = getAuthToken()
   const fileData = await readFileAsBase64(file)
 
   const res = await fetch('/.netlify/functions/attach-task', {
@@ -26,7 +28,7 @@ export async function attachFile({ taskGid, file }) {
 }
 
 export async function createTask({ title, details, dueDate, submitterName, submitterEmail, followerGid, assigneeGid, summary }) {
-  const passphraseToken = JSON.parse(localStorage.getItem('ogc_auth') ?? 'null')?.token ?? ''
+  const passphraseToken = getAuthToken()
 
   const res = await fetch('/.netlify/functions/create-task', {
     method: 'POST',
