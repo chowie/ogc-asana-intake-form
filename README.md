@@ -28,6 +28,9 @@ Copy `.env.example` to `.env` and fill in each value. All variables are server-s
 | Variable | Description |
 |---|---|
 | `PASSPHRASE` | Shared passphrase shown to staff before the form |
+| `AUTH_SECRET` | HMAC secret for signing the 1-hour session tokens issued by `verify-passphrase`. Generate with `npm run gen-secret` (see below) |
+| `UPSTASH_REDIS_REST_URL` | *(optional)* Upstash Redis REST URL — backs per-IP rate limiting on `verify-passphrase` & `chat`. Rate limiting is skipped if unset |
+| `UPSTASH_REDIS_REST_TOKEN` | *(optional)* Upstash Redis REST token |
 | `ASANA_PAT` | Asana Personal Access Token (scoped to the OGC Deacons project) |
 | `ASANA_PROJECT_GID` | GID of the "OGC Deacons" Asana project |
 | `ASANA_INBOX_SECTION_GID` | GID of the "Inbox" section inside that project |
@@ -51,6 +54,24 @@ curl -H "Authorization: Bearer <PAT>" \
   "https://app.asana.com/api/1.0/workspaces/<WORKSPACE_GID>/users"
 ```
 
+### Generating `AUTH_SECRET`
+
+```bash
+npm run gen-secret   # prints a 32-byte base64url random string
+```
+
+Set the value in both `.env` (local) and the Netlify environment variables
+(production). Rotating it invalidates all existing sessions — staff will have to
+re-enter the passphrase.
+
+### Rate limiting (optional)
+
+When both `UPSTASH_*` vars are set, `verify-passphrase` (5 requests/min per IP)
+and `chat` (20/min per IP) enforce per-IP rate limits via
+`netlify/functions/_shared/rate-limit.js`. When the vars are unset, limiting is
+silently skipped (fails open), so local `netlify dev` works without Redis. Create
+a free database at [console.upstash.com](https://console.upstash.com).
+
 ---
 
 ## Architecture
@@ -63,12 +84,14 @@ curl -H "Authorization: Bearer <PAT>" \
 5. `SuccessMessage` — confirmation with the Asana task name
 
 **Netlify Functions** (`netlify/functions/`):
-- `verify-passphrase.js` — validates the passphrase; returns `{ valid: boolean }`
+- `verify-passphrase.js` — validates the passphrase; on success issues a signed session token, returning `{ valid: true, token, expiresAt }`. The token is stateless and HMAC-SHA256-signed with a 1-hour TTL; the client stores `{ token, expiresAt }` in `localStorage` under `ogc_auth`
 - `chat.js` — proxies conversation to the Anthropic API (Philip persona + form context injected as system prompt)
 - `create-task.js` — creates the Asana task with the Philip-structured summary as task notes
 - `attach-task.js` — uploads the optional file attachment to the Asana task
 
-Every function validates `passphraseToken` from the request body as a secondary guard against direct POST abuse.
+Shared helpers live in `netlify/functions/_shared/`: `auth.js` (`issueToken` / `verifyToken` / the `requireAuth` guard) and `rate-limit.js` (the per-IP `limit` helper).
+
+Each protected function (`chat`, `create-task`, `attach-task`) calls `requireAuth`, which validates the signed `passphraseToken` sent in the request body and rejects unsigned or expired tokens (403) as a guard against direct POST abuse. `verify-passphrase` issues the token rather than validating one.
 
 **`data/roster.json`** is the build-time staff list. It is generated from Notion at build time (see [Roster management](#roster-management)) — the committed file contains only placeholder data and is overwritten during each Netlify build.
 
@@ -105,7 +128,7 @@ netlify deploy --build --prod  # production
 
 ### Environment variables
 
-Set all seven variables in **Netlify dashboard → Site configuration → Environment variables**. Functions read secrets at runtime; roster data is fetched at build time.
+Set all required variables in **Netlify dashboard → Site configuration → Environment variables** (the two `UPSTASH_*` vars are optional — rate limiting is skipped if absent). Functions read secrets at runtime; roster data is fetched at build time.
 
 ---
 
@@ -137,6 +160,9 @@ For a manual refresh without a code push:
 node --env-file=.env scripts/fetch-roster.mjs   # regenerates data/roster.json locally
 ```
 
+The `npm run refresh-roster` alias runs the same script but does **not** pass
+`--env-file`, so use the command above when relying on `.env` for credentials.
+
 If `NOTION_TOKEN` or `NOTION_ROSTER_DB_ID` are not set, the script exits cleanly and the build continues with the committed placeholder `data/roster.json`.
 
 ---
@@ -153,3 +179,4 @@ The deacon roster already lives in Notion operationally. Keeping it there means 
 - **Netlify Blobs / Postgres** — adds a runtime dependency for data that changes ~2x/year
 
 **Build-time fetch with committed fallback** wins: zero runtime latency, no API outage risk in the hot path, and the repo stays free of personal data. The rebuild lag on roster changes is a non-issue at this cadence.
+
