@@ -26,22 +26,30 @@ if (!NOTION_TOKEN || !NOTION_ROSTER_DB_ID) {
 }
 
 try {
-  const res = await fetch(`https://api.notion.com/v1/databases/${NOTION_ROSTER_DB_ID}/query`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${NOTION_TOKEN}`,
-      'Notion-Version': '2022-06-28',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({}),
-  })
+  // Notion returns at most 100 rows per request — page through all of them so
+  // active deacons beyond row 100 aren't silently dropped.
+  const results = []
+  let cursor
+  do {
+    const res = await fetch(`https://api.notion.com/v1/databases/${NOTION_ROSTER_DB_ID}/query`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${NOTION_TOKEN}`,
+        'Notion-Version': '2022-06-28',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(cursor ? { start_cursor: cursor } : {}),
+    })
 
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`Notion API responded ${res.status}: ${text}`)
-  }
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`Notion API responded ${res.status}: ${text}`)
+    }
 
-  const { results } = await res.json()
+    const page = await res.json()
+    results.push(...page.results)
+    cursor = page.has_more ? page.next_cursor : undefined
+  } while (cursor)
 
   const roster = results
     .filter((page) => {
@@ -54,6 +62,17 @@ try {
       asanaGid: page.properties['Asana GID']?.rich_text?.[0]?.plain_text ?? '',
     }))
     .filter((entry) => entry.name && entry.email && entry.asanaGid)
+
+  // If Notion returned rows but none survived the filter, a property was
+  // likely renamed ("Asana GID"/"Email"). Fail loudly instead of deploying an
+  // empty roster (which silently produces an empty staff dropdown).
+  if (results.length > 0 && roster.length === 0) {
+    console.error(
+      `[fetch-roster] Notion returned ${results.length} rows but 0 passed validation — ` +
+        'check the Name / Email / "Asana GID" property names. Not overwriting roster.json.'
+    )
+    process.exit(1)
+  }
 
   writeFileSync(OUTPUT_PATH, JSON.stringify(roster, null, 2) + '\n')
   console.log(`[fetch-roster] Wrote ${roster.length} entries to data/roster.json`)

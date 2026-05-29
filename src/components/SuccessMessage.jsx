@@ -1,4 +1,4 @@
-export default function SuccessMessage({ taskTitle, taskUrl, onReset }) {
+export default function SuccessMessage({ taskTitle, taskUrl, attachFailed, onReset }) {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 w-full max-w-sm p-8 text-center">
@@ -30,6 +30,12 @@ export default function SuccessMessage({ taskTitle, taskUrl, onReset }) {
               </span>
             )}
           </div>
+        )}
+
+        {attachFailed && (
+          <p role="alert" className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            Your request was submitted, but the attached file couldn&rsquo;t be uploaded. You can reply to the Asana task to add it.
+          </p>
         )}
 
         <button

@@ -104,7 +104,7 @@ describe('IntakeForm — onSubmit payload', () => {
 
     expect(onSubmit).toHaveBeenCalledOnce()
     const [args] = onSubmit.mock.calls[0]
-    expect(args.dueDate).toBeFalsy()
+    expect(args.dueDate).toBeNull()
   })
 })
 
@@ -152,6 +152,63 @@ describe('IntakeForm — name/email persistence', () => {
     renderForm()
     expect(screen.getByLabelText(/your name/i)).toHaveValue('Test User Two')
     expect(screen.getByLabelText(/your email/i)).toHaveValue('two@example.com')
+  })
+})
+
+describe('IntakeForm — file attachment', () => {
+  const fileInput = () => document.querySelector('input[type="file"]')
+
+  it('accepts a small file, shows its name, and calls onFileChange', async () => {
+    const onFileChange = vi.fn()
+    render(<IntakeForm onSubmit={vi.fn()} onFileChange={onFileChange} frozen={false} submitting={false} apiError={null} />)
+    const file = new File(['hello'], 'doc.pdf', { type: 'application/pdf' })
+
+    await userEvent.upload(fileInput(), file)
+
+    expect(onFileChange).toHaveBeenCalledWith(file)
+    expect(screen.getByText('doc.pdf')).toBeInTheDocument()
+    expect(screen.queryByText(/700 KB or smaller/i)).not.toBeInTheDocument()
+  })
+
+  it('rejects a file over 700 KB and reports null', async () => {
+    const onFileChange = vi.fn()
+    render(<IntakeForm onSubmit={vi.fn()} onFileChange={onFileChange} frozen={false} submitting={false} apiError={null} />)
+    const big = new File(['a'.repeat(701 * 1024)], 'big.pdf', { type: 'application/pdf' })
+
+    await userEvent.upload(fileInput(), big)
+
+    expect(screen.getByText(/700 KB or smaller/i)).toBeInTheDocument()
+    expect(onFileChange).toHaveBeenCalledWith(null)
+    expect(screen.queryByText('big.pdf')).not.toBeInTheDocument()
+  })
+
+  it('clears a selected file when the remove button is clicked', async () => {
+    const onFileChange = vi.fn()
+    render(<IntakeForm onSubmit={vi.fn()} onFileChange={onFileChange} frozen={false} submitting={false} apiError={null} />)
+    const file = new File(['hello'], 'doc.pdf', { type: 'application/pdf' })
+
+    await userEvent.upload(fileInput(), file)
+    expect(screen.getByText('doc.pdf')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /remove file/i }))
+
+    expect(onFileChange).toHaveBeenLastCalledWith(null)
+    expect(screen.queryByText('doc.pdf')).not.toBeInTheDocument()
+    expect(fileInput()).toBeInTheDocument()
+  })
+})
+
+describe('IntakeForm — assignee self-assignment prevention', () => {
+  it('resets assignee when the submitter selects themselves as the assignee', async () => {
+    renderForm()
+    // Pick a submitter, then assign the task to Test User Two.
+    await userEvent.selectOptions(screen.getByLabelText(/your name/i), 'Test User One')
+    await userEvent.selectOptions(screen.getByLabelText(/assign to/i), '0000000000000002')
+    expect(screen.getByLabelText(/assign to/i)).toHaveValue('0000000000000002')
+
+    // Now change the submitter to Test User Two — the assignee (now themselves) clears.
+    await userEvent.selectOptions(screen.getByLabelText(/your name/i), 'Test User Two')
+    expect(screen.getByLabelText(/assign to/i)).toHaveValue('')
   })
 })
 

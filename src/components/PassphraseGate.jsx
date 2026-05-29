@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { setAuth } from '../lib/auth.js'
 
 export default function PassphraseGate({ onAuthenticated }) {
   const [input, setInput] = useState('')
@@ -19,11 +20,10 @@ export default function PassphraseGate({ onAuthenticated }) {
 
       if (!res.ok) throw new Error('Server error')
 
-      const { valid } = await res.json()
+      const { valid, token, expiresAt } = await res.json()
 
-      if (valid) {
-        const ONE_HOUR_MS = 60 * 60 * 1000
-        localStorage.setItem('ogc_auth', JSON.stringify({ token: input, expiresAt: Date.now() + ONE_HOUR_MS }))
+      if (valid && token) {
+        setAuth({ token, expiresAt })
         onAuthenticated()
       } else {
         setError(true)

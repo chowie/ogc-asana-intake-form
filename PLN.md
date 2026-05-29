@@ -1,12 +1,10 @@
 # Remediation Plan — ogc-asana-intake-form
 
-> On approval, this content is written to `./PLN.md` (the requested deliverable).
-
 ## Context
 
 A full code review (`CODE_REVIEW.md`, 2026-05-29) found 25 findings (P0–P3) plus 5 testing gaps in this church intake-form app (React/Vite SPA + Netlify Functions, shared-passphrase auth). Three are critical auth holes: no rate limiting, a missing-env-var auth bypass (`undefined === undefined`), and the raw passphrase stored client-side as the API token. Goal: close every finding, hardening auth and decoupling the fragile submit flow, while adding the missing test coverage.
 
-**Decisions (confirmed with user):** cover all 25 findings + test gaps · rate limiting via Upstash Redis · replace raw-passphrase token with a server-signed opaque session token (`node:crypto`, no new deps for the token itself).
+**Decisions:** cover all 25 findings + test gaps · rate limiting via Upstash Redis · replace raw-passphrase token with a server-signed opaque session token (`node:crypto`, no new deps for the token itself).
 
 ---
 
