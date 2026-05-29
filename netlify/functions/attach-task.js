@@ -30,18 +30,64 @@ export async function handler(event) {
     }
   }
 
+  // The Asana PAT is workspace-scoped — confirm the target task belongs to the
+  // OGC Deacons project before attaching, so a caller can't target arbitrary tasks.
+  let preflightRes
+  try {
+    preflightRes = await fetch(`${ASANA_BASE}/tasks/${encodeURIComponent(taskGid)}?opt_fields=projects`, {
+      headers: { Authorization: `Bearer ${process.env.ASANA_PAT}`, Accept: 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    })
+  } catch (err) {
+    const timedOut = err.name === 'TimeoutError' || err.name === 'AbortError'
+    return {
+      statusCode: timedOut ? 504 : 502,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: timedOut ? 'Asana took too long to respond. Please try again.' : 'Failed to reach Asana' }),
+    }
+  }
+
+  if (!preflightRes.ok) {
+    return {
+      statusCode: 403,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'Task not found or not accessible' }),
+    }
+  }
+
+  const preflight = await preflightRes.json().catch(() => null)
+  const inProject = preflight?.data?.projects?.some((p) => p.gid === process.env.ASANA_PROJECT_GID)
+  if (!inProject) {
+    return {
+      statusCode: 403,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'Task is not in the allowed project' }),
+    }
+  }
+
   const buffer = Buffer.from(fileData, 'base64')
   const form = new FormData()
   form.append('parent', taskGid)
   form.append('file', new Blob([buffer], { type: mimeType || 'application/octet-stream' }), fileName)
 
-  const asanaRes = await fetch(`${ASANA_BASE}/attachments`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.ASANA_PAT}`,
-    },
-    body: form,
-  })
+  let asanaRes
+  try {
+    asanaRes = await fetch(`${ASANA_BASE}/attachments`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.ASANA_PAT}`,
+      },
+      body: form,
+      signal: AbortSignal.timeout(8000),
+    })
+  } catch (err) {
+    const timedOut = err.name === 'TimeoutError' || err.name === 'AbortError'
+    return {
+      statusCode: timedOut ? 504 : 502,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: timedOut ? 'Asana took too long to respond. Please try again.' : 'Failed to reach Asana' }),
+    }
+  }
 
   if (!asanaRes.ok) {
     const errBody = await asanaRes.json().catch(() => ({ errors: [{ message: 'Unknown error' }] }))
