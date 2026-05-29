@@ -1,32 +1,17 @@
 [
   {
-    "name": "Rachel Fulton",
-    "email": "rachfulton@gmail.com",
-    "asanaGid": "2581237627992"
+    "name": "Example Staff 1",
+    "email": "staff1@example.com",
+    "asanaGid": "0000000000000001"
   },
   {
-    "name": "Chris Howie",
-    "email": "chrisemaj7@gmail.com",
-    "asanaGid": "1208115286767358"
+    "name": "Example Staff 2",
+    "email": "staff2@example.com",
+    "asanaGid": "0000000000000002"
   },
   {
-    "name": "Andrew Fulton",
-    "email": "afulton@oneidagospel.org",
-    "asanaGid": "1208068577789872"
-  },
-  {
-    "name": "Jordan Shaulis",
-    "email": "shaulis.j@gmail.com",
-    "asanaGid": "1208115286767361"
-  },
-  {
-    "name": "Derek Smith",
-    "email": "mrsmith428@proton.me",
-    "asanaGid": "1212885653333082"
-  },
-  {
-    "name": "Bonnie Schulert",
-    "email": "office@oneidagospel.org",
-    "asanaGid": "1205533389740293"
+    "name": "Example Staff 3",
+    "email": "staff3@example.com",
+    "asanaGid": "0000000000000003"
   }
 ]
