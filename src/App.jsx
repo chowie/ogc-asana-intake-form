@@ -4,6 +4,7 @@ import IntakeForm from './components/IntakeForm.jsx'
 import PhilipChat from './components/PhilipChat.jsx'
 import SuccessMessage from './components/SuccessMessage.jsx'
 import { createTask, attachFile } from './lib/asana.js'
+import { getAuthToken, isAuthValid } from './lib/auth.js'
 
 const STAGE = {
   FORM: 'FORM',
@@ -15,14 +16,7 @@ const STAGE = {
 }
 
 export default function App() {
-  const [authenticated, setAuthenticated] = useState(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem('ogc_auth') ?? 'null')
-      return !!stored && stored.expiresAt > Date.now()
-    } catch {
-      return false
-    }
-  })
+  const [authenticated, setAuthenticated] = useState(isAuthValid)
   const [stage, setStage] = useState(STAGE.FORM)
   const [formData, setFormData] = useState(null)
   const [messages, setMessages] = useState([])
@@ -46,7 +40,7 @@ export default function App() {
         body: JSON.stringify({
           formData: currentFormData ?? formData,
           messages: apiMessages,
-          passphraseToken: JSON.parse(localStorage.getItem('ogc_auth') ?? 'null')?.token ?? '',
+          passphraseToken: getAuthToken(),
         }),
       })
     } catch {

@@ -3,10 +3,13 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import PassphraseGate from '../components/PassphraseGate.jsx'
 
+const SERVER_TOKEN = '9999999999999.abcdef.signature'
+
 function mockFetch(valid) {
   return vi.fn().mockResolvedValue({
     ok: true,
-    json: async () => ({ valid }),
+    json: async () =>
+      valid ? { valid: true, token: SERVER_TOKEN, expiresAt: 9999999999999 } : { valid: false },
   })
 }
 
@@ -41,7 +44,7 @@ describe('PassphraseGate', () => {
     await waitFor(() => expect(onAuthenticated).toHaveBeenCalledOnce())
   })
 
-  it('stores the passphrase token in localStorage with a 1-hour expiry on success', async () => {
+  it('stores the server-issued token (not the passphrase) in localStorage on success', async () => {
     vi.stubGlobal('fetch', mockFetch(true))
     const onAuthenticated = vi.fn()
     render(<PassphraseGate onAuthenticated={onAuthenticated} />)
@@ -50,7 +53,9 @@ describe('PassphraseGate', () => {
     await userEvent.click(screen.getByRole('button', { name: /enter/i }))
 
     await waitFor(() => expect(onAuthenticated).toHaveBeenCalledOnce())
-    expect(localStorage.setItem).toHaveBeenCalledWith('ogc_auth', expect.stringMatching(/"token":"deacon-gate"/))
+    // The raw passphrase must never be persisted.
+    expect(localStorage.setItem).not.toHaveBeenCalledWith('ogc_auth', expect.stringContaining('deacon-gate'))
+    expect(localStorage.setItem).toHaveBeenCalledWith('ogc_auth', expect.stringContaining(SERVER_TOKEN))
     expect(localStorage.setItem).toHaveBeenCalledWith('ogc_auth', expect.stringMatching(/"expiresAt":\d+/))
   })
 

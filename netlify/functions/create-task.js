@@ -1,3 +1,5 @@
+import { requireAuth } from './_shared/auth.js'
+
 const ASANA_BASE = 'https://app.asana.com/api/1.0'
 
 export async function handler(event) {
@@ -16,14 +18,9 @@ export async function handler(event) {
     }
   }
 
-  // Secondary passphrase check — prevents direct POST abuse bypassing the client gate
-  if (body.passphraseToken !== process.env.PASSPHRASE) {
-    return {
-      statusCode: 403,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: 'Forbidden' }),
-    }
-  }
+  // Secondary token check — prevents direct POST abuse bypassing the client gate
+  const forbidden = requireAuth(body)
+  if (forbidden) return forbidden
 
   const { title, details, dueDate, submitterName, submitterEmail, followerGid, assigneeGid, summary } = body
 
