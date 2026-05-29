@@ -172,6 +172,22 @@ export default function PhilipChat({
           {showSummary && summary && (
             <SummaryBlock summary={summary} onConfirm={onConfirm} onEdit={onEdit} awaitingConfirm={awaitingConfirm} />
           )}
+          {showSummary && !summary && (
+            <div className="flex items-start" data-testid="summary-error">
+              <div className="w-full px-4 py-3 text-sm bg-amber-50 border border-amber-200 rounded-xl rounded-tl-[4px]">
+                <p className="text-gray-800">
+                  Something went wrong putting your summary together. Your request hasn&rsquo;t been sent yet.
+                </p>
+                <button
+                  type="button"
+                  onClick={onEdit}
+                  className="mt-3 px-4 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Edit my request
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Input row */}

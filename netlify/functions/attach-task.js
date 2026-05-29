@@ -2,6 +2,25 @@ import { requireAuth } from './_shared/auth.js'
 
 const ASANA_BASE = 'https://app.asana.com/api/1.0'
 
+// Allowlist mirrors the client's accepted file types (IntakeForm ACCEPTED_TYPES).
+const ALLOWED_MIME = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'image/png',
+  'image/jpeg',
+])
+const MAX_DECODED_BYTES = 1024 * 1024 // 1 MB after base64 decode
+
+// Approximate decoded size from base64 length without allocating the buffer.
+function base64Bytes(b64) {
+  const len = b64.length
+  const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0
+  return Math.floor((len * 3) / 4) - padding
+}
+
 export async function handler(event) {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method Not Allowed' }
@@ -27,6 +46,22 @@ export async function handler(event) {
       statusCode: 400,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ error: 'Missing required fields' }),
+    }
+  }
+
+  if (!ALLOWED_MIME.has(mimeType)) {
+    return {
+      statusCode: 415,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'Unsupported file type' }),
+    }
+  }
+
+  if (typeof fileData !== 'string' || base64Bytes(fileData) > MAX_DECODED_BYTES) {
+    return {
+      statusCode: 413,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'File is too large' }),
     }
   }
 

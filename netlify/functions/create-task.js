@@ -1,6 +1,17 @@
 import { requireAuth } from './_shared/auth.js'
+import { isValidGid } from './_shared/roster.js'
 
 const ASANA_BASE = 'https://app.asana.com/api/1.0'
+
+const SUMMARY_FIELDS = ['what', 'context', 'scope', 'constraints', 'definition_of_done']
+
+function isCompleteSummary(summary) {
+  return (
+    !!summary &&
+    typeof summary === 'object' &&
+    SUMMARY_FIELDS.every((f) => typeof summary[f] === 'string' && summary[f].trim() !== '')
+  )
+}
 
 export async function handler(event) {
   if (event.httpMethod !== 'POST') {
@@ -24,7 +35,10 @@ export async function handler(event) {
 
   const { title, details, dueDate, submitterName, submitterEmail, followerGid, assigneeGid, summary } = body
 
-  if (!title || !submitterName || !submitterEmail || !followerGid || (!details && !summary)) {
+  const completeSummary = isCompleteSummary(summary)
+  // A complete summary OR free-text details is required. An empty summary {}
+  // no longer slips through (it would have produced literal "undefined" notes).
+  if (!title || !submitterName || !submitterEmail || !followerGid || (!details && !completeSummary)) {
     return {
       statusCode: 422,
       headers: { 'Content-Type': 'application/json' },
@@ -32,7 +46,17 @@ export async function handler(event) {
     }
   }
 
-  const notes = summary
+  // Follower/assignee must be real roster members — block adding arbitrary
+  // workspace users (who would get notified) via a direct POST.
+  if (!isValidGid(followerGid) || (assigneeGid && !isValidGid(assigneeGid))) {
+    return {
+      statusCode: 422,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'Unknown follower or assignee' }),
+    }
+  }
+
+  const notes = completeSummary
     ? `What: ${summary.what}\nContext: ${summary.context}\nScope: ${summary.scope}\nConstraints / timing: ${summary.constraints}\nDefinition of done: ${summary.definition_of_done}\n\nSubmitted by: ${submitterName} — ${submitterEmail}`
     : `${details}\n\nSubmitted by: ${submitterName} — ${submitterEmail}`
 
