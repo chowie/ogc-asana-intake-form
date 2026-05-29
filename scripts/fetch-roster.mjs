@@ -55,6 +55,17 @@ try {
     }))
     .filter((entry) => entry.name && entry.email && entry.asanaGid)
 
+  // If Notion returned rows but none survived the filter, a property was
+  // likely renamed ("Asana GID"/"Email"). Fail loudly instead of deploying an
+  // empty roster (which silently produces an empty staff dropdown).
+  if (results.length > 0 && roster.length === 0) {
+    console.error(
+      `[fetch-roster] Notion returned ${results.length} rows but 0 passed validation — ` +
+        'check the Name / Email / "Asana GID" property names. Not overwriting roster.json.'
+    )
+    process.exit(1)
+  }
+
   writeFileSync(OUTPUT_PATH, JSON.stringify(roster, null, 2) + '\n')
   console.log(`[fetch-roster] Wrote ${roster.length} entries to data/roster.json`)
 } catch (err) {

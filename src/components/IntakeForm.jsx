@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { STAFF, findStaff } from '../config/staff.js'
 
 const BLANK = { name: '', email: '', title: '', details: '', dueDate: '', assigneeGid: '' }
-const MAX_FILE_BYTES = 3.5 * 1024 * 1024
+const MAX_FILE_BYTES = 700 * 1024
 const ACCEPTED_TYPES = '.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg'
 
 function validate(form) {
@@ -61,7 +61,7 @@ export default function IntakeForm({ onSubmit, onFileChange, frozen, submitting,
   const handleFileChange = (e) => {
     const file = e.target.files?.[0] ?? null
     if (file && file.size > MAX_FILE_BYTES) {
-      setFileError('File must be 3.5 MB or smaller.')
+      setFileError('File must be 700 KB or smaller.')
       setSelectedFile(null)
       onFileChange?.(null)
       e.target.value = ''
@@ -230,7 +230,7 @@ export default function IntakeForm({ onSubmit, onFileChange, frozen, submitting,
               />
             )}
             {fileError && <p className="mt-1 text-sm text-red-600">{fileError}</p>}
-            <p className="mt-1 text-xs text-gray-400">PDF, Word, Excel, or image · max 3.5 MB</p>
+            <p className="mt-1 text-xs text-gray-400">PDF, Word, Excel, or image · max 700 KB</p>
           </div>
 
         </fieldset>
