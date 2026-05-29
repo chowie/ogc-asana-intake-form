@@ -48,15 +48,26 @@ export async function handler(event) {
     },
   }
 
-  const asanaRes = await fetch(`${ASANA_BASE}/tasks?opt_fields=name,permalink_url`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.ASANA_PAT}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify(payload),
-  })
+  let asanaRes
+  try {
+    asanaRes = await fetch(`${ASANA_BASE}/tasks?opt_fields=name,permalink_url`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.ASANA_PAT}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(8000),
+    })
+  } catch (err) {
+    const timedOut = err.name === 'TimeoutError' || err.name === 'AbortError'
+    return {
+      statusCode: timedOut ? 504 : 502,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: timedOut ? 'Asana took too long to respond. Please try again.' : 'Failed to reach Asana' }),
+    }
+  }
 
   if (!asanaRes.ok) {
     const errBody = await asanaRes.json().catch(() => ({ errors: [{ message: 'Unknown error' }] }))

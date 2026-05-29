@@ -99,12 +99,14 @@ Submitted by: ${formData.submitterName}`
         tool_choice: { type: 'tool', name: 'respond' },
         messages: messages.length > 0 ? messages : [{ role: 'user', content: 'Please begin.' }],
       }),
+      signal: AbortSignal.timeout(9000),
     })
   } catch (err) {
+    const timedOut = err.name === 'TimeoutError' || err.name === 'AbortError'
     return {
-      statusCode: 502,
+      statusCode: timedOut ? 504 : 502,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: 'Failed to reach Claude API' }),
+      body: JSON.stringify({ error: timedOut ? 'The assistant took too long to respond. Please try again.' : 'Failed to reach Claude API' }),
     }
   }
 

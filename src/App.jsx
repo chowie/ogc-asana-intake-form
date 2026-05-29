@@ -27,8 +27,12 @@ export default function App() {
   const [taskUrl, setTaskUrl] = useState('')
   const [errorMsg, setErrorMsg] = useState(null)
   const [attachedFile, setAttachedFile] = useState(null)
+  const [awaitingConfirm, setAwaitingConfirm] = useState(false)
+  const [attachFailed, setAttachFailed] = useState(false)
 
-  const callPhilip = async (apiMessages, currentStage, currentFormData) => {
+  const MAX_CLEAR_DEPTH = 2
+
+  const callPhilip = async (apiMessages, currentStage, currentFormData, depth = 0) => {
     setAwaitingAI(true)
     if ((currentStage ?? stage) !== STAGE.CLARIFYING) setStage(STAGE.CLARIFYING)
 
@@ -66,10 +70,18 @@ export default function App() {
       setAskedCount((c) => c + 1)
       setAwaitingAI(false)
     } else if (result.status === 'clear') {
+      if (depth >= MAX_CLEAR_DEPTH) {
+        setErrorMsg("We couldn't put your summary together. Please review your request and try again.")
+        setStage(STAGE.ERROR)
+        setAwaitingAI(false)
+        return
+      }
       setAwaitingAI(false)
       await callPhilip(
         [...apiMessages, { role: 'user', content: 'Great — please produce the summary now.' }],
-        STAGE.CLARIFYING
+        STAGE.CLARIFYING,
+        currentFormData ?? formData,
+        depth + 1
       )
     } else if (result.status === 'summarized') {
       setMessages((m) => [
@@ -106,18 +118,34 @@ export default function App() {
   }
 
   const handleConfirm = async () => {
+    if (awaitingConfirm) return // in-flight guard — prevents duplicate tasks on double-click
+    setAwaitingConfirm(true)
+
+    let data
     try {
-      const data = await createTask({ ...formData, summary })
-      if (attachedFile) {
-        await attachFile({ taskGid: data.data.gid, file: attachedFile })
-      }
-      setTaskTitle(data.data.name)
-      setTaskUrl(data.data.permalink_url ?? '')
-      setStage(STAGE.SUCCESS)
+      data = await createTask({ ...formData, summary })
     } catch (err) {
       setErrorMsg(err.message)
       setStage(STAGE.ERROR)
+      setAwaitingConfirm(false)
+      return
     }
+
+    // Task exists from here on — an attachment failure must not hide it or
+    // trigger a re-submit, so it is handled separately and surfaced as a warning.
+    setTaskTitle(data.data.name)
+    setTaskUrl(data.data.permalink_url ?? '')
+
+    if (attachedFile) {
+      try {
+        await attachFile({ taskGid: data.data.gid, file: attachedFile })
+      } catch {
+        setAttachFailed(true)
+      }
+    }
+
+    setStage(STAGE.SUCCESS)
+    setAwaitingConfirm(false)
   }
 
   const handleEdit = () => {
@@ -139,6 +167,8 @@ export default function App() {
     setTaskUrl('')
     setErrorMsg(null)
     setAttachedFile(null)
+    setAwaitingConfirm(false)
+    setAttachFailed(false)
   }
 
   if (!authenticated) {
@@ -146,7 +176,14 @@ export default function App() {
   }
 
   if (stage === STAGE.SUCCESS) {
-    return <SuccessMessage taskTitle={taskTitle} taskUrl={taskUrl} onReset={handleReset} />
+    return (
+      <SuccessMessage
+        taskTitle={taskTitle}
+        taskUrl={taskUrl}
+        attachFailed={attachFailed}
+        onReset={handleReset}
+      />
+    )
   }
 
   const frozen = stage !== STAGE.FORM && stage !== STAGE.ERROR
@@ -175,6 +212,7 @@ export default function App() {
             awaitingAI={awaitingAI}
             showSummary={stage === STAGE.SUMMARY}
             summary={summary}
+            awaitingConfirm={awaitingConfirm}
             onConfirm={handleConfirm}
             onEdit={handleEdit}
           />
