@@ -1,0 +1,99 @@
+---
+title: "Environment variables"
+description: "Every variable, what reads it, and what breaks without it."
+icon: "key"
+---
+
+Copy `.env.example` to `.env` and fill it in. `netlify dev` reads `.env`
+automatically.
+
+<Warning>
+  No variable is prefixed with `VITE_`. That's deliberate — a `VITE_` prefix
+  would bundle the value into client JS and publish it. Every secret here is
+  read only inside Netlify Functions or at build time.
+</Warning>
+
+## Required
+
+<ResponseField name="PASSPHRASE" type="string" required>
+  Shared passphrase staff enter before the form. Read only by
+  `verify-passphrase`, compared with `crypto.timingSafeEqual`.
+</ResponseField>
+
+<ResponseField name="AUTH_SECRET" type="string" required>
+  HMAC-SHA256 secret for signing session tokens. Generate with
+  `npm run gen-secret`. Rotating it invalidates every live session.
+</ResponseField>
+
+<ResponseField name="ASANA_PAT" type="string" required>
+  Asana Personal Access Token. Workspace-scoped, which is why `attach-task`
+  preflights that the target task is actually in the OGC Deacons project.
+</ResponseField>
+
+<ResponseField name="ASANA_PROJECT_GID" type="string" required>
+  GID of the OGC Deacons project. From the project URL:
+  `app.asana.com/0/<PROJECT_GID>/...`
+</ResponseField>
+
+<ResponseField name="ASANA_INBOX_SECTION_GID" type="string" required>
+  GID of the Inbox section inside that project.
+
+  ```bash
+  curl -H "Authorization: Bearer $ASANA_PAT" \
+    "https://app.asana.com/api/1.0/projects/<PROJECT_GID>/sections"
+  ```
+</ResponseField>
+
+<ResponseField name="ANTHROPIC_API_KEY" type="string" required>
+  Anthropic API key. Used by `chat` for Philip.
+</ResponseField>
+
+## Build-time (roster)
+
+<ResponseField name="NOTION_TOKEN" type="string">
+  Notion internal integration token, read-only, shared with the roster database
+  only.
+</ResponseField>
+
+<ResponseField name="NOTION_ROSTER_DB_ID" type="string">
+  ID of the Notion roster database — the 32-character hex string in the database
+  URL before `?v=`.
+</ResponseField>
+
+If either is unset, `scripts/fetch-roster.mjs` logs a warning, exits 0, and the
+build continues with the committed placeholder roster. See
+[Roster](/architecture/roster).
+
+## Optional (rate limiting)
+
+<ResponseField name="UPSTASH_REDIS_REST_URL" type="string">
+  Upstash Redis REST URL.
+</ResponseField>
+
+<ResponseField name="UPSTASH_REDIS_REST_TOKEN" type="string">
+  Upstash Redis REST token.
+</ResponseField>
+
+Both must be set for rate limiting to engage. With either missing, `limit()`
+logs a warning and returns `null` — requests pass through. See
+[Rate limiting](/operations/rate-limiting).
+
+## Who reads what
+
+| Variable | Read by | Missing → |
+|---|---|---|
+| `PASSPHRASE` | `verify-passphrase` | 500 Server misconfigured |
+| `AUTH_SECRET` | `_shared/auth.js` (all protected functions) | 500 at issue; 403 at verify (fails closed) |
+| `ASANA_PAT` | `create-task`, `attach-task` | Asana 401 surfaced to the client |
+| `ASANA_PROJECT_GID` | `create-task`, `attach-task` | Task creation fails; attach preflight rejects |
+| `ASANA_INBOX_SECTION_GID` | `create-task` | Asana rejects the membership |
+| `ANTHROPIC_API_KEY` | `chat` | 502 "Claude API returned an error" |
+| `NOTION_TOKEN` | `scripts/fetch-roster.mjs` (build) | Placeholder roster |
+| `NOTION_ROSTER_DB_ID` | `scripts/fetch-roster.mjs` (build) | Placeholder roster |
+| `UPSTASH_REDIS_REST_URL` | `_shared/rate-limit.js` | Limiting skipped |
+| `UPSTASH_REDIS_REST_TOKEN` | `_shared/rate-limit.js` | Limiting skipped |
+
+## Production
+
+Set the same values in **Netlify → Site configuration → Environment variables**.
+Functions read them at runtime; `NOTION_*` are read during the build step.

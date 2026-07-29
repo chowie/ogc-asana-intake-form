@@ -16,17 +16,43 @@ node --env-file=.env scripts/fetch-roster.mjs
 
 # Run a single test file
 npx vitest run src/__tests__/IntakeForm.test.jsx
+
+# Preview the docs site (Mintlify, config in docs/docs.json)
+npm run docs
 ```
+
+## Documentation
+
+Long-form docs live in `docs/` as Mintlify MDX and are the canonical reference —
+the README is a pointer, not a duplicate. When behavior changes, update the
+matching page:
+
+| Area | Page |
+|---|---|
+| Staff-facing behavior | `docs/staff/*.mdx` |
+| Setup, env vars, structure, tests | `docs/development/*.mdx` |
+| Stage machine, functions, auth, roster | `docs/architecture/*.mdx` |
+| Deploy, roster, secrets, rate limits, debugging | `docs/operations/*.mdx` |
+
+Adding a page means adding its path to `navigation` in `docs/docs.json`.
+Validate with `cd docs && npx mint@latest broken-links`.
 
 ## Architecture
 
-**App flow** — `App.jsx` drives three mutually exclusive states via two boolean flags:
-1. `!authenticated` → `PassphraseGate` (calls `/.netlify/functions/verify-passphrase`)
-2. `authenticated && !submitted` → `IntakeForm`
-3. `submitted` → `SuccessMessage`
+**App flow** — `App.jsx` runs a `useReducer` stage machine: `FORM` → `SUBMITTING`
+→ `CLARIFYING` → `SUMMARY` → `SUCCESS`, plus `ERROR`. Authentication sits outside
+the reducer as a single `authenticated` boolean (`!authenticated` →
+`PassphraseGate`). The form is editable only in `FORM` and `ERROR` — a positive
+allowlist, so any new stage is frozen by default.
+
+Two constants bound the AI loop: `MAX_Q = 3` (question budget) and
+`MAX_CLEAR_DEPTH = 2` (recursion cap on `clear` → summarize). Re-entrancy is
+guarded by refs (`philipInFlight`, `confirmInFlight`), not state — state updates
+aren't visible in the same tick, so a state guard wouldn't stop a double-click
+from creating duplicate tasks.
 
 **Netlify Functions proxy** — All secrets are server-side. The browser holds zero credentials.
-- `netlify/functions/verify-passphrase.js` — validates the passphrase and returns `{ valid: boolean }`
+- `netlify/functions/verify-passphrase.js` — validates the passphrase (constant-time) and returns `{ valid, token, expiresAt }`; the token is a stateless HMAC-SHA256 `${exp}.${nonce}.${sig}` with a 1-hour TTL
 - `netlify/functions/create-task.js` — proxies task creation to the Asana REST API; also validates `passphraseToken` as a secondary check to prevent direct POST abuse
 - `netlify/functions/chat.js` — proxies conversation to the Anthropic API (Philip persona)
 - `netlify/functions/attach-task.js` — uploads optional file attachments to the Asana task

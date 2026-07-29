@@ -1,0 +1,71 @@
+---
+title: "FAQ & troubleshooting"
+description: "Common questions and error messages, in plain language."
+icon: "circle-question"
+---
+
+## Getting in
+
+<AccordionGroup>
+  <Accordion title="It's asking for the passphrase again">
+    Sessions last one hour. After that you re-enter the passphrase. Nothing is
+    wrong.
+  </Accordion>
+  <Accordion title="It says 'Incorrect passphrase' but I'm sure it's right">
+    The passphrase screen shows that same message for every failure, including
+    too many attempts in a row and a server problem. Wait a full minute and try
+    once more. If it still fails, the office needs to check the site — see
+    [Troubleshooting](/operations/troubleshooting).
+  </Accordion>
+  <Accordion title="My name isn't in the dropdown">
+    The staff list comes from the church's Notion roster. Ask the office to add
+    you — see [Roster management](/operations/roster-management). The list
+    updates on the next site rebuild, not instantly.
+  </Accordion>
+</AccordionGroup>
+
+## Filling out the form
+
+<AccordionGroup>
+  <Accordion title="Can I assign the request to myself?">
+    No — you're automatically added as a **follower**, which is what gets you
+    notifications. The assignee dropdown deliberately excludes you.
+  </Accordion>
+  <Accordion title="Do I have to pick an assignee?">
+    No. Leave it Unassigned and the deacons will triage it from the Inbox.
+  </Accordion>
+  <Accordion title="Can I edit a request after submitting?">
+    Not from this form. Open the task in Asana from the confirmation link and
+    edit or comment there.
+  </Accordion>
+</AccordionGroup>
+
+## Error messages
+
+| Message | What it means | What to do |
+|---|---|---|
+| "We couldn't reach the assistant." | Network problem or the AI service is down. | Wait a moment and submit again. Your typing is preserved. |
+| "The assistant took too long to respond." | Philip exceeded the time limit. | Submit again. |
+| "We couldn't put your summary together." | Philip failed to produce a usable summary. | Add a bit more detail to the request and resubmit. |
+| "Asana took too long to respond." | Asana was slow or unreachable. | Press Confirm again — no task was created. |
+| "Too many requests." | Rate limit hit. | Wait about a minute. |
+| Attachment warning on the success screen | Task created, file upload failed. | Add the file directly in Asana. **Don't resubmit.** |
+
+<Note>
+  The rule of thumb: if you never reached the **confirmation screen**, no task
+  was created and it's safe to try again. If you *did* reach it, the task exists
+  — fix anything else in Asana rather than resubmitting.
+</Note>
+
+## Privacy
+
+<AccordionGroup>
+  <Accordion title="Who can see my request?">
+    Anyone with access to the OGC Deacons Asana project. Your name and email are
+    appended to the bottom of the task description.
+  </Accordion>
+  <Accordion title="Is anything stored in my browser?">
+    Two things: your session token (expires in an hour) and your name and email
+    so the form pre-fills next time. No request content is kept locally.
+  </Accordion>
+</AccordionGroup>

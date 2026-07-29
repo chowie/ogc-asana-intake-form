@@ -1,0 +1,57 @@
+---
+title: "Testing"
+description: "Vitest + Testing Library. 78 tests across 9 files."
+icon: "flask"
+---
+
+```bash
+npm test            # single run
+npm run test:watch  # watch mode
+npx vitest run src/__tests__/IntakeForm.test.jsx   # one file
+```
+
+Stack: [Vitest](https://vitest.dev) + `@testing-library/react` on jsdom. Setup
+file is `src/test/setup.js`.
+
+## Coverage map
+
+| File | Tests | Covers |
+|---|--:|---|
+| `src/__tests__/IntakeForm.test.jsx` | 19 | Email pre-fill, validation, submit payload, frozen/submitting/apiError states, file accept/reject/clear, self-assignment reset, `localStorage` persistence, `initialData` re-population |
+| `src/__tests__/PhilipChat.test.jsx` | 14 | Header, message rendering, typing indicator, send on click/Enter, input cleared, disabled during AI wait, summary panel show/hide, confirm/edit |
+| `src/__tests__/App.test.jsx` | 10 | Auth gating (no token / expired / valid), chat error paths, clear → summarized recursion, confirm flow, double-click guard, attachment-failure warning |
+| `src/__tests__/PassphraseGate.test.jsx` | 8 | Render, success callback, token (not passphrase) stored, wrong-passphrase error, `!ok` and network failures, button disabled while checking, error clears on re-type |
+| `netlify/functions/_shared/__tests__/auth.test.js` | 9 | Token issue/verify, tampering, wrong secret, expiry, missing `AUTH_SECRET` fails closed, `requireAuth` 403 |
+| `netlify/functions/__tests__/create-task.test.js` | 6 | Auth guard, unknown follower/assignee GID rejection, empty-summary rejection, details fallback, notes built from a complete summary |
+| `netlify/functions/__tests__/chat.test.js` | 5 | Auth guard, `needs_clarification` passthrough, 502 on `summarized` with a missing summary, 200 on a complete summary, user fields kept out of the system prompt |
+| `netlify/functions/__tests__/attach-task.test.js` | 5 | Auth guard, MIME allowlist (415), size cap (413), out-of-project task rejection (403), successful upload |
+| `data/__tests__/roster-placeholder.test.js` | 2 | Guards against committing real PII in `data/roster.json` |
+
+## Patterns used
+
+**Mocking the roster.** `src/config/staff.js` is replaced with `vi.mock` +
+`vi.hoisted` in `IntakeForm.test.jsx`, so the tests don't depend on whatever
+happens to be in `data/roster.json`.
+
+```js
+const { STAFF } = vi.hoisted(() => ({ STAFF: [/* fixtures */] }))
+vi.mock('../config/staff.js', () => ({ STAFF, findStaff: (n) => ... }))
+```
+
+**Mocking fetch.** `vi.stubGlobal('fetch', ...)` — used in
+`PassphraseGate.test.jsx` and the function tests.
+
+**The PII guard.** `data/__tests__/roster-placeholder.test.js` fails the build if
+`data/roster.json` looks like real staff data rather than the placeholder. This
+exists because real names, emails, and Asana GIDs were committed once already.
+
+<Warning>
+  Don't "fix" that test by loosening it after running `npm run refresh-roster`
+  locally — the generated roster is not meant to be committed. Revert
+  `data/roster.json` before committing.
+</Warning>
+
+## What isn't covered
+
+No end-to-end tests. The Asana and Anthropic APIs are mocked at the `fetch`
+boundary in every test — nothing in CI hits a live API.

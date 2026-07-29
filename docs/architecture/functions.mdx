@@ -1,0 +1,159 @@
+---
+title: "Netlify Functions"
+description: "The four endpoints, their contracts, and their status codes."
+icon: "server"
+---
+
+All four live in `netlify/functions/`. Every one rejects non-`POST` with 405 and
+malformed JSON with 400. Shared helpers sit in `_shared/` — the underscore keeps
+Netlify from deploying them as endpoints.
+
+## verify-passphrase
+
+The only unauthenticated endpoint. Issues the session token everything else
+requires.
+
+<CodeGroup>
+```json Request
+{ "passphrase": "..." }
+```
+
+```json Response 200 (valid)
+{ "valid": true, "token": "1753900000000.Ab3xY.sig", "expiresAt": 1753900000000 }
+```
+
+```json Response 200 (invalid)
+{ "valid": false }
+```
+</CodeGroup>
+
+| Code | When |
+|---|---|
+| 200 | Always for a well-formed attempt — `valid` carries the result |
+| 429 | Over 5 requests/min from this IP |
+| 500 | `PASSPHRASE` or `AUTH_SECRET` unset |
+
+Comparison uses `crypto.timingSafeEqual`, not `===`. A wrong passphrase returns
+**200 with `valid: false`**, not 401 — the client distinguishes "wrong
+passphrase" from "server broken" by the body, not the status.
+
+## chat
+
+Proxies the conversation to the Anthropic API as Philip.
+
+```json Request
+{
+  "formData": { "title": "...", "details": "...", "dueDate": "...", "submitterName": "..." },
+  "messages": [{ "role": "user", "content": "..." }],
+  "passphraseToken": "..."
+}
+```
+
+Response is the validated tool input, one of:
+
+```json
+{ "status": "needs_clarification", "question": "..." }
+{ "status": "clear" }
+{ "status": "summarized", "summary": { "what": "...", "context": "...", "scope": "...", "constraints": "...", "definition_of_done": "..." } }
+```
+
+| Code | When |
+|---|---|
+| 200 | Valid tool response |
+| 400 | `formData` missing or `messages` not an array |
+| 403 | Invalid or missing token |
+| 429 | Over 20 requests/min from this IP |
+| 502 | Anthropic error, unparseable response, or `summarized` with an incomplete summary |
+| 504 | Anthropic exceeded the 9-second timeout |
+
+### Structured output via forced tool use
+
+The model is called with `tool_choice: { type: "tool", name: "respond" }` and a
+schema requiring `status`. The handler reads `content[].tool_use.input` — it
+never parses JSON out of prose.
+
+<Note>
+  The schema only requires `status`, so a `summarized` response can legally omit
+  `summary`. The handler re-validates all five summary fields as non-empty
+  strings and returns 502 if any is missing, so the client never reaches a blank
+  summary panel.
+</Note>
+
+### Prompt-injection containment
+
+User-controlled text is **not** interpolated into the system prompt. It goes
+into a `<form_submission>`-delimited user message, length-capped per field
+(title 200, details 4000, due date 40, name 100), and the system prompt
+instructs the model to treat that block as data. There's a test for exactly
+this.
+
+## create-task
+
+```json Request
+{
+  "title": "...", "details": "...", "dueDate": "2026-08-01",
+  "submitterName": "...", "submitterEmail": "...",
+  "followerGid": "...", "assigneeGid": null,
+  "summary": { "what": "...", "...": "..." },
+  "passphraseToken": "..."
+}
+```
+
+| Code | When |
+|---|---|
+| 200 | Task created — returns the Asana payload with `name` and `permalink_url` |
+| 403 | Invalid token |
+| 422 | Missing required fields, or a `followerGid`/`assigneeGid` not in the roster |
+| 502 | Asana unreachable |
+| 504 | Asana exceeded the 8-second timeout |
+| *pass-through* | Asana's own status on an API error |
+
+Two validations worth noting:
+
+**Summary-or-details.** The task body is built from the five-field summary when
+it's complete, otherwise from raw `details`. An empty `{}` summary is rejected
+rather than producing literal `"undefined"` in the notes.
+
+**GID allowlist.** `followerGid` and `assigneeGid` are checked against
+`isValidGid()`, which is built from `data/roster.json`. Without it, a direct POST
+could add any workspace user as a follower and spam them with notifications.
+
+## attach-task
+
+```json Request
+{ "taskGid": "...", "fileName": "quote.pdf", "mimeType": "application/pdf", "fileData": "<base64>", "passphraseToken": "..." }
+```
+
+| Code | When |
+|---|---|
+| 200 | Attachment created |
+| 400 | Missing `taskGid`, `fileName`, or `fileData` |
+| 403 | Invalid token, task not found, or task not in the allowed project |
+| 413 | Decoded size over 1 MB |
+| 415 | MIME type not in the allowlist |
+| 502 / 504 | Asana unreachable / timed out |
+
+**Project preflight.** The Asana PAT is workspace-scoped, so before attaching,
+the handler `GET`s the task and confirms `ASANA_PROJECT_GID` is among its
+projects. Otherwise a caller with a valid session token could attach files to any
+task in the workspace.
+
+**Size is checked twice.** The client caps at 700 KB; the server caps the decoded
+payload at 1 MB. The server figures decoded size arithmetically from the base64
+length rather than allocating the buffer first.
+
+## Shared helpers
+
+<CardGroup cols={3}>
+  <Card title="_shared/auth.js" icon="key">
+    `issueToken` / `verifyToken` / `requireAuth`. See
+    [Authentication](/architecture/authentication).
+  </Card>
+  <Card title="_shared/rate-limit.js" icon="gauge">
+    Per-IP `limit()` backed by Upstash. Fails open. See
+    [Rate limiting](/operations/rate-limiting).
+  </Card>
+  <Card title="_shared/roster.js" icon="users">
+    `isValidGid()` — the roster-derived GID allowlist.
+  </Card>
+</CardGroup>

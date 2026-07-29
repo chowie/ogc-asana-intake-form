@@ -1,0 +1,84 @@
+---
+title: "Deployment"
+description: "Netlify build config, env vars, and manual deploys."
+icon: "cloud-arrow-up"
+---
+
+Hosted on Netlify. Static build in `dist/`, functions from `netlify/functions/`,
+SPA redirect for client routing — all declared in `netlify.toml`, so nothing
+needs configuring in the dashboard except environment variables.
+
+## Continuous deployment
+
+**Site configuration → Build & deploy → Continuous deployment → Link
+repository.** Authorize GitHub, pick the repo. Every push to `master` deploys.
+
+```toml netlify.toml
+[build]
+  command = "node scripts/fetch-roster.mjs && npm run build"
+  publish = "dist"
+```
+
+The roster fetch runs before Vite, so each deploy bakes in the current Notion
+roster.
+
+## Manual deploy
+
+```bash
+npm install -g netlify-cli
+netlify deploy --build          # deploy preview
+netlify deploy --build --prod   # production
+```
+
+## Environment variables
+
+**Site configuration → Environment variables.** All ten:
+
+| Variable | Required? |
+|---|---|
+| `PASSPHRASE` | Yes |
+| `AUTH_SECRET` | Yes |
+| `ASANA_PAT` | Yes |
+| `ASANA_PROJECT_GID` | Yes |
+| `ASANA_INBOX_SECTION_GID` | Yes |
+| `ANTHROPIC_API_KEY` | Yes |
+| `NOTION_TOKEN` | Build-time — without it, the placeholder roster ships |
+| `NOTION_ROSTER_DB_ID` | Build-time — same |
+| `UPSTASH_REDIS_REST_URL` | Optional — no rate limiting without it |
+| `UPSTASH_REDIS_REST_TOKEN` | Optional — same |
+
+Details in [Environment variables](/development/environment-variables).
+
+<Warning>
+  Changing an environment variable does **not** redeploy the site. Functions pick
+  up new values on the next invocation, but anything baked in at build time (the
+  roster) needs a rebuild: **Deploys → Trigger deploy → Clear cache and deploy
+  site**.
+</Warning>
+
+## Post-deploy checks
+
+<Steps>
+  <Step title="Passphrase gate loads">
+    A blank screen or 500 here usually means `PASSPHRASE` or `AUTH_SECRET` is
+    unset.
+  </Step>
+  <Step title="The name dropdown lists real staff">
+    Placeholder names ("Example Staff 1") mean the roster fetch was skipped —
+    check the build log for `[fetch-roster]`.
+  </Step>
+  <Step title="Submit a throwaway request end to end">
+    Confirms the Anthropic key, the Asana PAT, and both Asana GIDs. Delete the
+    task afterward.
+  </Step>
+  <Step title="Check the build log for rate-limit warnings">
+    `[rate-limit] Upstash not configured` in production means the site is running
+    unlimited.
+  </Step>
+</Steps>
+
+## Rollback
+
+**Deploys → select a previous successful deploy → Publish deploy.** Instant, no
+rebuild. Note that this restores the *code and roster from that build* — if the
+roster has changed since, redeploy rather than rolling back.

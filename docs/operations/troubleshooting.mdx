@@ -1,0 +1,149 @@
+---
+title: "Troubleshooting"
+description: "Symptom → cause → fix, for the person on the hook."
+icon: "screwdriver-wrench"
+---
+
+Function logs are the first stop for everything below: **Netlify → Logs →
+Functions**, filtered by function name.
+
+## Nobody can get past the passphrase
+
+<Warning>
+  `PassphraseGate` renders **"Incorrect passphrase. Please try again."** for
+  every failure — a genuine mismatch, a 429, a 500, and a network error all look
+  identical to staff. Diagnose from the `verify-passphrase` function log, not
+  from what the user reports seeing.
+</Warning>
+
+<AccordionGroup>
+  <Accordion title="Log shows 500 'Server misconfigured'">
+    `PASSPHRASE` or `AUTH_SECRET` is unset in Netlify. Set both. No rebuild
+    needed — functions read env at invocation.
+  </Accordion>
+  <Accordion title="Log shows 429">
+    Rate limit — 5 attempts per minute per IP. If the whole office shares an IP,
+    a few people trying at once can trip it. Wait a minute.
+  </Accordion>
+  <Accordion title="Log shows 200 with valid: false, but the passphrase looks right">
+    Check for trailing whitespace in the Netlify variable value. The comparison
+    is byte-exact.
+  </Accordion>
+  <Accordion title="Everyone is suddenly signed out">
+    `AUTH_SECRET` changed. Every live token was signed with the old value and now
+    fails verification. Expected after a rotation — staff re-enter the
+    passphrase.
+  </Accordion>
+</AccordionGroup>
+
+## The staff dropdown shows "Example Staff 1"
+
+The build ran with the placeholder roster. Check the build log for
+`[fetch-roster]`:
+
+| Log | Fix |
+|---|---|
+| `NOTION_TOKEN or NOTION_ROSTER_DB_ID not set` | Set both in Netlify, rebuild |
+| `Notion API responded 401` | Re-share the database with the integration |
+| `Notion API responded 404` | Wrong database ID |
+| No `[fetch-roster]` line at all | The build command was overridden in the dashboard — it should match `netlify.toml` |
+
+Full detail: [Roster management](/operations/roster-management).
+
+## Philip fails
+
+<AccordionGroup>
+  <Accordion title="502 'Claude API returned an error'">
+    Usually an invalid or over-quota `ANTHROPIC_API_KEY`. Check the Anthropic
+    Console for billing or rate-limit status.
+  </Accordion>
+  <Accordion title="504 'The assistant took too long to respond'">
+    The 9-second timeout fired. Transient — retrying normally works. Persistent
+    504s mean an Anthropic incident.
+  </Accordion>
+  <Accordion title="502 'The assistant returned an incomplete summary'">
+    The model called the tool with `status: summarized` but omitted or blanked a
+    summary field. The handler rejects it rather than showing a blank panel.
+    Retrying usually clears it.
+  </Accordion>
+  <Accordion title="'We couldn't put your summary together'">
+    Client-side: `MAX_CLEAR_DEPTH` was hit — Philip kept returning `clear`
+    instead of producing a summary. Usually a very short request. Ask the
+    submitter to add detail.
+  </Accordion>
+  <Accordion title="403 Forbidden on chat">
+    The session expired mid-conversation (one-hour TTL). The staff member
+    refreshes and re-enters the passphrase.
+  </Accordion>
+</AccordionGroup>
+
+## Task creation fails
+
+<AccordionGroup>
+  <Accordion title="422 'Unknown follower or assignee'">
+    The submitted GID isn't in `data/roster.json`. Most likely the roster changed
+    in Notion but the deployed build still has the old one — rebuild. If it
+    persists, the `Asana GID` value in Notion is wrong.
+  </Accordion>
+  <Accordion title="401 / 403 from Asana">
+    `ASANA_PAT` is invalid, revoked, or belongs to someone who lost access to the
+    project.
+  </Accordion>
+  <Accordion title="400 from Asana about section or project">
+    `ASANA_PROJECT_GID` or `ASANA_INBOX_SECTION_GID` is wrong — most often after
+    the Inbox section was renamed and recreated. Re-fetch:
+
+    ```bash
+    curl -H "Authorization: Bearer $ASANA_PAT" \
+      "https://app.asana.com/api/1.0/projects/<PROJECT_GID>/sections"
+    ```
+  </Accordion>
+  <Accordion title="504 'Asana took too long'">
+    The 8-second timeout fired. **No task was created** — safe to retry.
+  </Accordion>
+</AccordionGroup>
+
+## Attachments fail
+
+| Code | Cause |
+|---|---|
+| 415 | MIME type outside the allowlist. The client's `accept` list and the server's allowlist can drift — check both if a legitimate type is rejected |
+| 413 | Over 1 MB decoded. The client caps at 700 KB, so a 413 means the request didn't come from the form |
+| 403 "Task is not in the allowed project" | `ASANA_PROJECT_GID` doesn't match the project the task landed in |
+| 403 "Task not found or not accessible" | The preflight `GET` failed — usually a PAT permission problem |
+
+Remember: an attachment failure never means the task failed. The task is created
+first.
+
+## Duplicate tasks
+
+The `confirmInFlight` ref guards double-clicks, and `philipInFlight` guards
+double submits. If duplicates appear anyway, the likely cause is a staff member
+resubmitting the whole form after an *attachment* warning. That's a docs problem
+— point them at [Attachments](/staff/attachments).
+
+## Everything is slow or unlimited
+
+Look for `[rate-limit] Upstash not configured` in the function logs. In
+production that means the limiter is off entirely. See
+[Rate limiting](/operations/rate-limiting).
+
+## Escalation
+
+<Steps>
+  <Step title="Is it the app or a dependency?">
+    Check [status.anthropic.com](https://status.anthropic.com),
+    [status.asana.com](https://status.asana.com), and
+    [netlifystatus.com](https://www.netlifystatus.com). Three of the four failure
+    modes above are upstream.
+  </Step>
+  <Step title="Roll back">
+    **Deploys → previous successful deploy → Publish deploy.** Instant. Note that
+    it also restores that build's roster.
+  </Step>
+  <Step title="Fall back to email">
+    The form is a convenience over emailing the deacons. If it's down during an
+    event week, say so and take requests by email rather than debugging under
+    pressure.
+  </Step>
+</Steps>

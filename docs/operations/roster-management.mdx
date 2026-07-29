@@ -1,0 +1,88 @@
+---
+title: "Roster management"
+description: "Adding, removing, and publishing staff changes."
+icon: "users-gear"
+---
+
+The staff dropdown comes from a Notion database, baked into the site at build
+time. Editing Notion is step one; step two is triggering a rebuild.
+
+## Adding someone
+
+<Steps>
+  <Step title="Get their Asana user GID">
+    ```bash
+    curl -H "Authorization: Bearer $ASANA_PAT" \
+      "https://app.asana.com/api/1.0/workspaces/<WORKSPACE_GID>/users"
+    ```
+  </Step>
+  <Step title="Add a row to the Notion roster database">
+    Fill `Name`, `Email`, and `Asana GID`, and check `Active`. All three text
+    fields must be non-empty — rows missing any of them are dropped silently.
+  </Step>
+  <Step title="Trigger a rebuild">
+    Via the Notion automation below, or manually in Netlify:
+    **Deploys → Trigger deploy → Clear cache and deploy site**.
+  </Step>
+  <Step title="Verify">
+    Load the site and confirm the new name appears in both the **Your Name** and
+    **Assign to** dropdowns.
+  </Step>
+</Steps>
+
+## Removing someone
+
+Uncheck `Active` and rebuild. Don't delete the row — keeping it preserves the GID
+if they come back.
+
+<Note>
+  Removing someone does not affect existing Asana tasks. They stay a follower on
+  anything they already submitted.
+</Note>
+
+## Publishing changes automatically
+
+Roster edits don't reach the live site until a build runs. Wire that up once:
+
+<Steps>
+  <Step title="Create a Netlify build hook">
+    **Site configuration → Build & deploy → Build hooks → Add build hook.** Copy
+    the URL.
+  </Step>
+  <Step title="Add a Notion automation">
+    On the roster database: trigger on the **Active** checkbox being toggled →
+    action: webhook → POST to the build hook URL.
+  </Step>
+</Steps>
+
+Triggering on `Active` rather than on any edit makes publishing an explicit act —
+you can fix a typo in an email without kicking off a deploy, then toggle `Active`
+when the row is ready.
+
+## Refreshing locally
+
+```bash
+node --env-file=.env scripts/fetch-roster.mjs
+```
+
+<Warning>
+  This writes **real staff data** into `data/roster.json`. Run
+  `git checkout data/roster.json` before committing. A test
+  (`data/__tests__/roster-placeholder.test.js`) fails the suite if real data is
+  staged, but it's easier to just revert.
+</Warning>
+
+## When the build reports a problem
+
+| Log line | Meaning | Fix |
+|---|---|---|
+| `NOTION_TOKEN or NOTION_ROSTER_DB_ID not set` | Env vars missing in Netlify | Set them, rebuild |
+| `Notion API responded 401` | Token invalid or database not shared with the integration | Re-share the DB with the integration |
+| `Notion API responded 404` | Wrong `NOTION_ROSTER_DB_ID` | Re-copy the 32-char hex ID from the database URL |
+| `returned N rows but 0 passed validation` | A property was renamed | Restore the exact names `Name`, `Email`, `Asana GID` |
+| `Wrote 0 entries` | Every row is inactive or incomplete | Check the `Active` checkboxes |
+
+The first three exit 0 — the build **continues** with whatever `data/roster.json`
+is committed, which is the placeholder. A live site showing "Example Staff 1"
+means one of those happened. The renamed-property case exits 1 and fails the
+build deliberately.

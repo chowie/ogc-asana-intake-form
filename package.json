@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "refresh-roster": "node scripts/fetch-roster.mjs",
+    "docs": "cd docs && npx mint@latest dev",
     "gen-secret": "node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\""
   },
   "dependencies": {

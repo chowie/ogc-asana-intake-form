@@ -1,0 +1,73 @@
+---
+title: "Project structure"
+description: "Where everything lives."
+icon: "folder-tree"
+---
+
+```
+├── src/
+│   ├── App.jsx                    # stage machine (useReducer) + orchestration
+│   ├── components/
+│   │   ├── PassphraseGate.jsx     # passphrase screen
+│   │   ├── IntakeForm.jsx         # the form + client validation + file picker
+│   │   ├── PhilipChat.jsx         # chat panel + summary + confirm/edit
+│   │   └── SuccessMessage.jsx     # confirmation screen
+│   ├── lib/
+│   │   ├── asana.js               # createTask() / attachFile() fetch wrappers
+│   │   └── auth.js                # localStorage session token helpers
+│   ├── config/staff.js            # STAFF + findStaff(), reads data/roster.json
+│   └── __tests__/                 # component tests
+├── netlify/functions/
+│   ├── verify-passphrase.js       # issues the session token
+│   ├── chat.js                    # Anthropic proxy (Philip)
+│   ├── create-task.js             # Asana task creation
+│   ├── attach-task.js             # Asana attachment upload
+│   ├── _shared/
+│   │   ├── auth.js                # issueToken / verifyToken / requireAuth
+│   │   ├── rate-limit.js          # per-IP limit() helper
+│   │   └── roster.js              # isValidGid() allowlist
+│   └── __tests__/                 # function tests
+├── scripts/fetch-roster.mjs       # Notion → data/roster.json (build time)
+├── data/roster.json               # generated staff list (placeholder in git)
+├── docs/                          # this documentation site (Mintlify)
+└── netlify.toml                   # build, functions dir, SPA redirect
+```
+
+## Conventions worth knowing
+
+**Shared helpers are prefixed `_`.** `netlify/functions/_shared/` is skipped by
+Netlify's function discovery, so those files are importable modules, not
+deployed endpoints.
+
+**Client never holds secrets.** Anything sensitive goes through a function.
+`src/lib/asana.js` posts to the function, not to Asana.
+
+**The roster is the allowlist.** `data/roster.json` drives both the UI dropdown
+(`src/config/staff.js`) and server-side GID validation
+(`netlify/functions/_shared/roster.js`). One file, two consumers.
+
+**Refs guard async re-entrancy.** `App.jsx` uses `useRef` flags
+(`philipInFlight`, `confirmInFlight`) rather than state, because state updates
+aren't visible within the same tick — that's what prevents duplicate tasks on a
+double-click.
+
+## Build
+
+`netlify.toml`:
+
+```toml
+[build]
+  command = "node scripts/fetch-roster.mjs && npm run build"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+```
+
+The roster fetch runs *before* Vite so the live roster is baked into the bundle.

@@ -1,0 +1,87 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "OGC Deacon Request Form",
+  "description": "How Oneida Gospel Church staff submit requests to the Deacon board, and how the app behind it is built and operated.",
+  "colors": {
+    "primary": "#2563EB",
+    "light": "#60A5FA",
+    "dark": "#1D4ED8"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Staff Guide",
+        "groups": [
+          {
+            "group": "Start here",
+            "pages": [
+              "index",
+              "staff/submitting-a-request"
+            ]
+          },
+          {
+            "group": "Details",
+            "pages": [
+              "staff/working-with-philip",
+              "staff/attachments",
+              "staff/faq"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Developers",
+        "groups": [
+          {
+            "group": "Getting started",
+            "pages": [
+              "development/quickstart",
+              "development/environment-variables",
+              "development/project-structure",
+              "development/testing"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/functions",
+              "architecture/authentication",
+              "architecture/roster"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Operations",
+        "groups": [
+          {
+            "group": "Runbook",
+            "pages": [
+              "operations/deployment",
+              "operations/roster-management",
+              "operations/secrets",
+              "operations/rate-limiting",
+              "operations/troubleshooting"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/chowie/ogc-asana-intake-form"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/chowie/ogc-asana-intake-form"
+    }
+  }
+}

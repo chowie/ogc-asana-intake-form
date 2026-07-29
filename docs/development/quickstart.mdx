@@ -1,0 +1,85 @@
+---
+title: "Quickstart"
+description: "Clone, configure, and run the app locally."
+icon: "rocket"
+---
+
+## Requirements
+
+- Node.js 20.17+ (Netlify CLI and the Mintlify CLI both want it)
+- An Asana Personal Access Token with access to the OGC Deacons project
+- An Anthropic API key
+
+## Setup
+
+```bash
+git clone <repo-url>
+cd ogc-asana-intake-form
+npm install
+cp .env.example .env
+# fill in .env — see Environment variables
+netlify dev
+```
+
+`netlify dev` serves Vite **and** the Netlify Functions together at
+`http://localhost:8888`. This is the mode you want for anything that touches
+Philip, task creation, or the passphrase gate.
+
+<Warning>
+  `npm run dev` starts the frontend only, on port 5173. The functions aren't
+  running, so the passphrase gate, Philip, and task creation all fail. Use it
+  only for pure UI work.
+</Warning>
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `netlify dev` | Full stack — Vite + Functions on :8888 |
+| `npm run dev` | Frontend only on :5173 |
+| `npm run build` | Production build to `dist/` |
+| `npm test` | Run the Vitest suite once |
+| `npm run test:watch` | Vitest in watch mode |
+| `npm run gen-secret` | Print a random 32-byte value for `AUTH_SECRET` |
+| `npm run refresh-roster` | Regenerate `data/roster.json` from Notion |
+
+Run a single test file:
+
+```bash
+npx vitest run src/__tests__/IntakeForm.test.jsx
+```
+
+## Working without every secret
+
+The app degrades in predictable ways, which is useful locally:
+
+<CardGroup cols={2}>
+  <Card title="No UPSTASH_* vars" icon="gauge">
+    Rate limiting is skipped entirely (fails open) with a console warning.
+    `netlify dev` works fine without Redis.
+  </Card>
+  <Card title="No NOTION_* vars" icon="database">
+    `fetch-roster.mjs` exits 0 and the committed placeholder
+    `data/roster.json` is used.
+  </Card>
+  <Card title="No PASSPHRASE or AUTH_SECRET" icon="lock">
+    `verify-passphrase` returns 500 "Server misconfigured". Nothing past the
+    gate works — these two are mandatory.
+  </Card>
+  <Card title="No ANTHROPIC_API_KEY" icon="robot">
+    Form submits, then Philip errors out. The form stays editable.
+  </Card>
+</CardGroup>
+
+## Docs site
+
+These docs live in `docs/` and are built with [Mintlify](https://mintlify.com).
+
+```bash
+npm i -g mint     # or: npx mint@latest dev
+cd docs
+mint dev          # preview at http://localhost:3000
+```
+
+Config is `docs/docs.json`. Pages are `.mdx`; adding one means adding its path
+to `navigation` in `docs.json` too.

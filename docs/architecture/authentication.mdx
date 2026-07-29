@@ -1,0 +1,106 @@
+---
+title: "Authentication"
+description: "Shared passphrase in, stateless signed token out."
+icon: "shield-halved"
+---
+
+One shared passphrase for roughly six staff. It gates casual access; the signed
+token it produces is what actually protects the functions.
+
+## Flow
+
+<Steps>
+  <Step title="Staff submit the passphrase">
+    `PassphraseGate` POSTs it to `verify-passphrase`. The passphrase itself is
+    never stored anywhere client-side.
+  </Step>
+  <Step title="Server compares in constant time">
+    `crypto.timingSafeEqual` against `process.env.PASSPHRASE`.
+  </Step>
+  <Step title="Server issues a token">
+    `issueToken()` returns `{ token, expiresAt }` with a 1-hour TTL.
+  </Step>
+  <Step title="Client stores it">
+    `localStorage` key `ogc_auth` holds `{ token, expiresAt }` — the token, not
+    the passphrase.
+  </Step>
+  <Step title="Every protected call carries it">
+    `chat`, `create-task`, and `attach-task` each call `requireAuth(body)` and
+    return 403 without a valid token.
+  </Step>
+</Steps>
+
+## Token format
+
+```
+${exp}.${nonce}.${sig}
+```
+
+- `exp` — expiry as epoch milliseconds
+- `nonce` — 9 random bytes, base64url
+- `sig` — `HMAC-SHA256(AUTH_SECRET, "${exp}.${nonce}")`, base64url
+
+Stateless: nothing is stored server-side, so there's no session store to run and
+no revocation list. The only way to invalidate live tokens is rotating
+`AUTH_SECRET`.
+
+## Verification
+
+`verifyToken()` rejects, in order: non-strings, anything not exactly three
+dot-separated parts, signature length mismatch, signature mismatch (via
+`timingSafeEqual`), non-finite expiry, and expiry in the past.
+
+<Note>
+  If `AUTH_SECRET` is unset, `sign()` throws and `verifyToken` catches it and
+  returns `false` — it **fails closed**. A misconfigured deploy rejects everyone
+  rather than accepting everyone.
+</Note>
+
+## What this does and doesn't protect
+
+<AccordionGroup>
+  <Accordion title="Stops: direct POSTs against the functions">
+    Without a valid signed token, `chat`, `create-task`, and `attach-task` all
+    return 403. Someone who finds the function URLs can't burn the Anthropic
+    budget or spam Asana.
+  </Accordion>
+  <Accordion title="Stops: brute-forcing the passphrase">
+    `verify-passphrase` is rate-limited to 5 attempts per minute per IP (when
+    Upstash is configured) and compares in constant time.
+  </Accordion>
+  <Accordion title="Does not stop: a staff member sharing the passphrase">
+    Anyone with the passphrase gets in. This is accepted — the audience is church
+    staff, and every submission is attributed by name and email in the task body.
+  </Accordion>
+  <Accordion title="Does not stop: XSS reading the token from localStorage">
+    A token in `localStorage` is readable by any script on the page. The app has
+    no user-generated HTML rendering and no third-party scripts, which is what
+    makes this acceptable; an httpOnly cookie would be the stricter option.
+  </Accordion>
+  <Accordion title="Does not identify who is calling">
+    The token carries no identity — it proves "someone knew the passphrase within
+    the last hour". Identity comes from the name selected in the form, which is
+    validated against the roster only in the sense that the GID must be a real
+    roster GID.
+  </Accordion>
+</AccordionGroup>
+
+## Client helpers
+
+`src/lib/auth.js`:
+
+| Function | Purpose |
+|---|---|
+| `setAuth({ token, expiresAt })` | Persist to `localStorage` |
+| `getAuthToken()` | Token string, or `''` |
+| `isAuthValid()` | True when a stored token exists and hasn't expired |
+| `clearAuth()` | Remove it |
+
+`App.jsx` initializes its `authenticated` state from `isAuthValid`, so a
+returning staff member inside the hour skips the gate.
+
+<Warning>
+  The client-side expiry check is convenience only. Expiry is enforced
+  server-side inside `verifyToken` — editing `localStorage` to extend
+  `expiresAt` gets you the form UI and a 403 from every function.
+</Warning>
