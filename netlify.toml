@@ -2,6 +2,13 @@
   command = "node scripts/fetch-roster.mjs && npm run build"
   publish = "dist"
 
+[build.environment]
+  # The Google OAuth client ID is public by design and is intentionally
+  # bundled into the client (VITE_GOOGLE_CLIENT_ID). GOOGLE_CLIENT_ID holds the
+  # same value. Exempt both from Netlify's secret scan, which otherwise fails
+  # the build when it finds the ID in dist/. Real secrets are still scanned.
+  SECRETS_SCAN_OMIT_KEYS = "VITE_GOOGLE_CLIENT_ID,GOOGLE_CLIENT_ID"
+
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"

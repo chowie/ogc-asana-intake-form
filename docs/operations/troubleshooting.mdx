@@ -149,6 +149,16 @@ failure in this order:
 ## Google sign-in
 
 <AccordionGroup>
+  <Accordion title="Build fails with exit code 2 and a 'secrets scan' report">
+    Netlify's secret scan found an env var's value in the repo or in `dist/`.
+    The Google client ID is meant to be public and bundled, so `netlify.toml`
+    exempts it with `SECRETS_SCAN_OMIT_KEYS`. If the scan flags
+    `VITE_GOOGLE_CLIENT_ID` on lines that only contain the variable **name**,
+    the value stored in Netlify is wrong (for example, the key name pasted
+    into the value field). It should look like
+    `123456789-abc….apps.googleusercontent.com`. Any other flagged key is a
+    real leak: remove the value from the file and rotate it.
+  </Accordion>
   <Accordion title="No Google button">
     `VITE_GOOGLE_CLIENT_ID` was unset **at build time**. Set it and use **Clear
     cache and deploy site**. Also check that `accounts.google.com` isn't
