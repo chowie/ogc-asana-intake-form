@@ -1,0 +1,161 @@
+---
+title: "Inviting users"
+description: "Inviting staff, re-inviting, revoking access, and managing who can invite."
+icon: "user-plus"
+---
+
+Accounts are invitation-only. Only **inviters** can send invitations. An
+inviter is anyone whose email is listed in the `INVITER_EMAILS` environment
+variable.
+
+## Sending an invite
+
+<Steps>
+  <Step title="Sign in as an inviter">
+    Inviters don't need an invitation themselves. Signing in for the first time
+    creates an active account.
+  </Step>
+  <Step title="Open the Invite panel">
+    Click **Invite** in the header, next to your email and **Sign out**.
+    Non-inviters don't see this button.
+  </Step>
+  <Step title="Enter their email">
+    Type the address they'll register with. It has to match exactly when they
+    register (capital letters don't matter), so if they'll use **Sign up with
+    Google**, enter their Google address.
+  </Step>
+  <Step title="Choose how to deliver it">
+    **Email the invite to them for me** is checked by default. With it checked,
+    they get an email saying who invited them, with an **Accept invite**
+    button. Clear the checkbox to skip the email and send the link yourself by
+    text, chat, or your own email.
+  </Step>
+  <Step title="Create invite">
+    The panel shows the link (`…/invite?token=…`) with a **Copy** button and
+    the expiry time. The link is shown even when it was emailed. If the email
+    fails to send, the panel says so, and you can copy the link and send it
+    yourself.
+  </Step>
+</Steps>
+
+Every invite link:
+
+- works **once**,
+- works **only for the email you entered**, and
+- expires after **48 hours**.
+
+The link is shown only in the panel when you create it. It isn't stored
+anywhere you can look it up later. Redis keeps only a hash of it.
+
+<Note>
+  You can't invite someone who already has an active account. You'll see
+  "That person already has an account" and should tell them to sign in.
+  There's a limit of 20 invites per hour per IP.
+</Note>
+
+## What the invitee sees
+
+<Steps>
+  <Step title="Accept your invitation">
+    The link opens a **Register** screen. They enter the invited email, or use
+    **Sign up with Google** with a Google account on that address. If the
+    address doesn't match, they get an error and can try again. The invite
+    isn't used up by a mismatch.
+  </Step>
+  <Step title="Confirm your email">
+    Next comes a **Confirm your email** screen with numbered steps and a
+    **Resend confirmation email** button. They have **24 hours** to confirm.
+    After that, the confirmation link and the pending account both expire, and
+    they need a new invite. The app stays locked until they click it, even if they signed up
+    with Google.
+  </Step>
+  <Step title="Signed in">
+    Clicking **Confirm my email** on the page the link opens signs them in.
+    After that they sign in with an emailed link or Google. See
+    [Submitting a request](/staff/submitting-a-request#1-sign-in).
+  </Step>
+</Steps>
+
+## Re-inviting
+
+Create a new invite for the same email. This works when:
+
+- **The invite expired or was lost.** It's unused after 48 hours.
+- **They registered but never confirmed.** Pending accounts expire after **24
+  hours**, at the same time as the confirmation link. Once that happens, there's
+  nothing left to resend, so send a new invite. You can also re-invite a
+  still-pending account if they closed the screen that has the Resend button.
+  Registering again replaces the pending record.
+- **You mistyped their address.** Invite the correct address. The old invite
+  simply expires.
+
+Old invites can't be cancelled, but they only work for the address they were
+created for, and they expire on their own.
+
+## Revoking access
+
+Accounts are stored in Upstash Redis. The recommended way to remove someone is
+to **disable** their record:
+
+<Steps>
+  <Step title="Open the Data Browser">
+    [console.upstash.com](https://console.upstash.com) → your production
+    database → **Data Browser**.
+  </Step>
+  <Step title="Find their key">
+    Search for `user:<their email, lowercased>`, for example
+    `user:jane.doe@example.com`. The value looks like
+    `{ "email": …, "status": "active", "provider": "email", "invitedBy": …, … }`.
+  </Step>
+  <Step title="Set status to disabled">
+    Edit the value and change `"status": "active"` to `"status": "disabled"`.
+    Leave the rest of the JSON as it is, and save.
+  </Step>
+</Steps>
+
+Every authenticated request checks this record, so their next request returns
+401 and drops them to the sign-in screen, even if a session is still open.
+Sign-in links, Google sign-in, and old confirmation links all stop working for
+them, and because the record still exists, they can't be re-provisioned
+automatically.
+
+**Deleting** the key also revokes a regular member immediately. Disabling is
+still the better choice: it leaves a record of the revocation, and it also
+works for inviters.
+
+<Warning>
+  Deleting an **inviter's** record isn't enough. With no record, an
+  `INVITER_EMAILS` address is re-provisioned as active on its next sign-in. To
+  revoke an inviter, either set their status to `"disabled"` (which takes
+  effect immediately and holds even while they're still listed), or remove
+  them from `INVITER_EMAILS`, redeploy, **and then** delete the record.
+</Warning>
+
+To restore someone, set their status back to `"active"` in the Data Browser.
+Re-inviting won't do it: `create-invite` refuses a disabled account (409
+"That account is disabled"), and an invite sent before they were disabled
+is rejected at registration (403). A disabled account only comes back when
+someone deliberately edits the record.
+
+## Adding or removing inviters
+
+Edit `INVITER_EMAILS` in **Netlify → Site configuration → Environment
+variables**. It's a comma-separated list, and spaces and capitalization don't
+matter.
+
+<Warning>
+  Netlify applies environment-variable changes to functions only on the **next
+  deploy**. After editing, go to **Deploys → Trigger deploy → Deploy site**.
+  Until that deploy finishes, the old list is still in effect.
+</Warning>
+
+- **Adding** someone lets them sign in without an invite once the deploy
+  finishes, and the **Invite** button appears after they reload. If they
+  already had an active account, it simply gains invite rights. A `disabled`
+  record stays disabled. Set it back to `"active"` yourself.
+- **Removing** someone takes away the Invite button and the ability to sign in
+  without an account. Their account stays **active** as a normal member. To
+  cut off their access completely, also disable their record (see above).
+
+Invite rights are checked against `INVITER_EMAILS` on every request. They
+aren't stored on the account.

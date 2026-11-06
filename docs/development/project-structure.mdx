@@ -8,25 +8,44 @@ icon: "folder-tree"
 ├── src/
 │   ├── App.jsx                    # stage machine (useReducer) + orchestration
 │   ├── components/
-│   │   ├── PassphraseGate.jsx     # passphrase screen
+│   │   ├── AuthLayout.jsx         # shared card layout for auth screens
+│   │   ├── SignIn.jsx             # magic-link request + Google sign-in
+│   │   ├── Register.jsx           # /invite landing: register by email or Google
+│   │   ├── CheckEmail.jsx         # "Confirm your email" + resend
+│   │   ├── ConfirmToken.jsx       # /verify and /login: spend token on click
+│   │   ├── InvitePanel.jsx        # inviter-only: create/copy invite links
+│   │   ├── GoogleButton.jsx       # Google Identity Services button
 │   │   ├── IntakeForm.jsx         # the form + client validation + file picker
 │   │   ├── PhilipChat.jsx         # chat panel + summary + confirm/edit
 │   │   └── SuccessMessage.jsx     # confirmation screen
 │   ├── lib/
 │   │   ├── asana.js               # createTask() / attachFile() fetch wrappers
-│   │   └── auth.js                # localStorage session token helpers
+│   │   └── auth.js                # auth function wrappers, ApiError, parseAuthRoute
 │   ├── config/staff.js            # STAFF + findStaff(), reads data/roster.json
 │   └── __tests__/                 # component tests
 ├── netlify/functions/
-│   ├── verify-passphrase.js       # issues the session token
+│   ├── session.js                 # GET: who is signed in
+│   ├── login.js                   # magic link request/redeem, Google sign-in
+│   ├── register.js                # accept an invite → pending account
+│   ├── verify-email.js            # confirm email → session; resend
+│   ├── create-invite.js           # inviter-only invite links
+│   ├── logout.js                  # end the session
 │   ├── chat.js                    # Anthropic proxy (Philip)
 │   ├── create-task.js             # Asana task creation
 │   ├── attach-task.js             # Asana attachment upload
 │   ├── _shared/
-│   │   ├── auth.js                # issueToken / verifyToken / requireAuth
+│   │   ├── redis.js               # shared Upstash client
+│   │   ├── tokens.js              # random tokens + SHA-256 hashing
+│   │   ├── session.js             # ogc_session cookie, requireSession()
+│   │   ├── users.js               # user records, inviters, canSignIn()
+│   │   ├── verification.js        # confirmation-email tokens
+│   │   ├── email.js               # Resend sender + email templates
+│   │   ├── google.js              # Google ID token verification (jose)
+│   │   ├── http.js                # json(), parseJsonPost(), appUrl()
+│   │   ├── timing.js              # response-time floor (anti-enumeration)
 │   │   ├── rate-limit.js          # per-IP limit() helper
 │   │   └── roster.js              # isValidGid() allowlist
-│   └── __tests__/                 # function tests
+│   └── __tests__/                 # function tests (+ helpers/fake-redis.js)
 ├── scripts/fetch-roster.mjs       # Notion → data/roster.json (build time)
 ├── data/roster.json               # generated staff list (placeholder in git)
 ├── docs/                          # this documentation site (Mintlify)
@@ -40,7 +59,12 @@ Netlify's function discovery, so those files are importable modules, not
 deployed endpoints.
 
 **Client never holds secrets.** Anything sensitive goes through a function.
-`src/lib/asana.js` posts to the function, not to Asana.
+`src/lib/asana.js` posts to the function, not to Asana. The session is an
+`HttpOnly` cookie, so client code never touches it. The one `VITE_` variable is
+the public Google client ID.
+
+**Auth fails closed, rate limiting fails open.** Both use `getRedis()`. A
+`null` client means "deny" for auth and "skip" for rate limiting.
 
 **The roster is the allowlist.** `data/roster.json` drives both the UI dropdown
 (`src/config/staff.js`) and server-side GID validation

@@ -19,15 +19,16 @@ Asana **OGC Deacons** project as a task in the **Inbox** section.
     Local setup, environment variables, architecture, and tests.
   </Card>
   <Card title="I run this thing" icon="wrench" href="/operations/deployment">
-    Deploys, roster updates, secret rotation, and troubleshooting.
+    Deploys, inviting users, roster updates, secret rotation, and troubleshooting.
   </Card>
 </CardGroup>
 
 ## What happens to a request
 
 <Steps>
-  <Step title="Passphrase">
-    Staff enter a shared passphrase. A signed session lasts one hour.
+  <Step title="Sign in">
+    Staff sign in with their own invited account, using an emailed link or
+    Google. Sessions end after 30 minutes of inactivity.
   </Step>
   <Step title="Form">
     Name, request title, details, plus optional due date, assignee, and file.
@@ -45,6 +46,7 @@ Asana **OGC Deacons** project as a task in the **Inbox** section.
 </Steps>
 
 <Note>
-  No credentials ever reach the browser. Every secret — the Asana token, the
-  Anthropic key, the passphrase — lives server-side in Netlify Functions.
+  No credentials ever reach the browser. Every secret (the Asana token, the
+  Anthropic key, the email and Redis credentials) lives server-side in Netlify
+  Functions. The session is an `HttpOnly` cookie that page scripts can't read.
 </Note>

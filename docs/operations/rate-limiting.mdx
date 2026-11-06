@@ -1,87 +1,112 @@
 ---
-title: "Rate limiting"
-description: "Per-IP limits on the two abusable endpoints, backed by Upstash Redis."
+title: "Rate limiting & Redis"
+description: "Per-IP limits on sign-in and Philip, and the Upstash Redis behind them and behind accounts."
 icon: "gauge-high"
 ---
 
-Two endpoints are limited per IP:
+Upstash Redis does two jobs:
 
-| Endpoint | Limit | Why |
-|---|---|---|
-| `verify-passphrase` | 5 / minute | Passphrase brute force |
-| `chat` | 20 / minute | Anthropic spend |
+1. **Accounts and sessions.** It holds users, invites, one-time links, and
+   sessions. This is **required**. Without Redis, nobody can sign in. See
+   [Authentication](/architecture/authentication#storage).
+2. **Rate limiting.** Per-IP limits on the endpoints someone could abuse. This
+   is best-effort and fails open.
 
-`create-task` and `attach-task` are not rate-limited — they already require a
-valid signed token, and Asana enforces its own limits.
+## Limits
+
+| Limiter id | Endpoint | Limit | Why |
+|---|---|---|---|
+| `login-request` | `login { email }` | 5 / 10 min | Stops email flooding through magic-link requests |
+| `login-redeem` | `login { loginToken }` | 10 / min | Token guessing (on top of 256-bit tokens) |
+| `login-google` | `login { googleCredential }` | 10 / min | Abuse of the Google token check |
+| `register` | `register` | 10 / min | Invite-token guessing |
+| `verify-email` | `verify-email { token }` | 10 / min | Token guessing |
+| `resend-verify` | `verify-email { resend }` | 3 / 10 min | Email flooding |
+| `create-invite` | `create-invite` | 20 / hour | Caps invite emails, even from an inviter's account |
+| `chat` | `chat` | 20 / min | Anthropic spend |
+
+`create-task` and `attach-task` aren't rate-limited. They already require a
+live session, and Asana enforces its own limits. `session` and `logout` aren't
+limited either.
 
 ## How it works
 
 `netlify/functions/_shared/rate-limit.js` wraps `@upstash/ratelimit` with a
-sliding window. Client IP is read from `x-nf-client-connection-ip`, falling back
-to the first entry in `x-forwarded-for`, then `'unknown'`.
+sliding window, using the shared client from `_shared/redis.js`. The client IP
+comes from `x-nf-client-connection-ip`, then the first entry in
+`x-forwarded-for`, then `'unknown'`.
 
-Redis clients and limiters are memoized per key so a warm function instance
-doesn't rebuild them.
+Limiters are memoized per id, so a warm function instance doesn't rebuild them.
+Redis keys are prefixed `rl:<id>`, for example `rl:chat` or
+`rl:login-request`.
 
-## Fail-open
+## Fail-open (limits) vs fail-closed (auth)
 
 <Warning>
   When `UPSTASH_REDIS_REST_URL` or `UPSTASH_REDIS_REST_TOKEN` is unset, or the
-  limiter call throws, `limit()` logs a warning and returns `null` — **the
-  request proceeds**. Rate limiting is not enforced.
+  limiter call throws, `limit()` logs a warning and returns `null`, and **the
+  request goes ahead**. Auth does the opposite: the same missing config means
+  every session check fails, and nobody gets in.
 </Warning>
 
-That's deliberate: a Redis outage shouldn't take the form down for six staff.
-The tradeoff is that an unnoticed misconfiguration leaves production unlimited.
+Limits fail open because a brief Redis error during a limit check shouldn't
+block a staff member who is already signed in. Auth fails closed because a
+broken auth config shouldn't let strangers in. In practice, a missing Redis
+config shows up right away as "nobody can sign in", not as quietly unlimited
+traffic.
 
-Check for it in the function logs:
+Look for these in the function logs:
 
 ```
 [rate-limit] Upstash not configured — skipping limit for "chat"
 [rate-limit] limiter error for "chat": <message> — allowing
+[session] lookup failed: <message>
 ```
-
-The first in a production log means the env vars are missing. The second means
-Upstash is reachable but erroring.
 
 ## Setup
 
 <Steps>
   <Step title="Create a database">
-    Free tier at [console.upstash.com](https://console.upstash.com). Any region;
-    pick one near the Netlify function region.
+    Free tier at [console.upstash.com](https://console.upstash.com). Any region
+    works, but pick one near the Netlify function region. Use a **separate**
+    database for local development, so test accounts stay out of production.
   </Step>
   <Step title="Copy the REST credentials">
     The database page shows `UPSTASH_REDIS_REST_URL` and
-    `UPSTASH_REDIS_REST_TOKEN` — the REST pair, not the Redis protocol URL.
+    `UPSTASH_REDIS_REST_TOKEN`. Use the REST pair, not the Redis protocol URL.
   </Step>
   <Step title="Set them in Netlify">
-    **Site configuration → Environment variables.** Both, or neither — one alone
-    does nothing.
+    **Site configuration → Environment variables.** Set both, then redeploy.
   </Step>
   <Step title="Verify">
-    Enter a wrong passphrase six times quickly. The sixth should return
+    Sign in as an inviter. That proves auth storage works. Then request a magic
+    link six times in a row for any email. The sixth request should return
     "Too many requests."
   </Step>
 </Steps>
 
-Keys are prefixed `rl:verify-passphrase` and `rl:chat` in Redis.
+<Note>
+  The free tier is far more than this app needs. Each authenticated request
+  costs about two commands (`GETEX` on the session plus `GET` on the user),
+  plus one limiter call where a limit applies.
+</Note>
 
 ## Tuning
 
-Limits are arguments at the call site, not config:
+Limits are set as arguments where `limit()` is called, not in config:
 
 ```js
-await limit(event, { id: 'verify-passphrase', max: 5, windowSec: 60 })
+await limit(event, { id: 'login-request', max: 5, windowSec: 600 })
 await limit(event, { id: 'chat', max: 20, windowSec: 60 })
 ```
 
 Changing them means a code change and a deploy. Twenty chat calls a minute is
-generous for a single user (a full conversation is 4–5 calls) but caps runaway
-spend from one IP.
+generous for one person (a full conversation is 4–5 calls) but caps runaway
+spend from a single IP.
 
 <Note>
-  Limits are per IP, so an entire church office behind one NAT shares a bucket.
-  If staff report spurious "Too many requests" during a busy week, raising the
-  `chat` limit is the right fix — not disabling the limiter.
+  Limits are per IP, so a whole church office behind one NAT shares a bucket.
+  The tightest limit is `login-request` at 5 per 10 minutes. If several people
+  in the office request sign-in links at the same moment, they can hit it.
+  Raise that limit if it becomes a problem; don't disable the limiter.
 </Note>

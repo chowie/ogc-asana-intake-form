@@ -61,6 +61,7 @@
             "group": "Runbook",
             "pages": [
               "operations/deployment",
+              "operations/inviting-users",
               "operations/roster-management",
               "operations/secrets",
               "operations/rate-limiting",

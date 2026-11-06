@@ -1,6 +1,6 @@
 ---
 title: "Submitting a request"
-description: "Walk through the form from passphrase to confirmation."
+description: "Walk through signing in, the form, and confirmation."
 icon: "clipboard-list"
 ---
 
@@ -8,24 +8,73 @@ The whole thing takes two or three minutes. Nothing is sent to the deacons until
 you press **Confirm**, so there is no way to accidentally submit a half-finished
 request.
 
-## 1. Enter the passphrase
+## 1. Sign in
 
-The first screen asks for a shared passphrase. Ask the office if you do not have
-it.
+Each person has their own account, and there are no passwords. To get an
+account you need an invitation from a deacon. If you don't have one yet, ask.
 
-Once accepted, you stay signed in for **one hour**. After that the passphrase
-screen comes back — that is normal, not an error.
+### Accepting your invitation (first time only)
+
+<Steps>
+  <Step title="Open the invite link">
+    It arrives by email ("You're invited to the OGC Deacon Board request
+    form"), or the deacon may send it to you directly. It works **once**, only
+    for **your** email address, and expires after **48 hours**.
+  </Step>
+  <Step title="Register">
+    Type the email address the invite was sent to and press **Register**. You
+    can also press **Sign up with Google** if your Google account uses that
+    same address. If the address doesn't match, you'll see an error, and you
+    can fix it and try again. The invite isn't used up by a mistake.
+  </Step>
+  <Step title="Confirm your email">
+    You'll see a **Confirm your email** screen. Open the email from OGC Deacons
+    (check spam or promotions), click **Confirm my email**, then press the
+    confirm button on the page that opens. If it doesn't arrive, use **Resend
+    confirmation email**. You have **24 hours** to confirm. After that, your
+    registration lapses and you'll need a new invite.
+  </Step>
+  <Step title="You're in">
+    Confirming signs you in. You can't use the form until this step is done,
+    even if you signed up with Google.
+  </Step>
+</Steps>
+
+### Signing in after that
+
+Pick either option on the sign-in screen:
+
+- **Email me a sign-in link.** Enter your email and open the link you're sent.
+  It works once and expires in **15 minutes**. When the page opens, press
+  **Sign in**.
+- **Sign in with Google**, if it's shown.
+
+<Note>
+  Links from our emails always open a page with a button to press. That's on
+  purpose: some email systems open links automatically to scan them, and the
+  button keeps the scan from using up your link.
+</Note>
+
+You're signed out after **30 minutes without activity**, or when you close the
+browser. If that happens while you're filling out a request, you'll see a
+notice on the sign-in screen. **Your request is still there.** Sign in again
+and submit it. If you open the sign-in link in a new tab, go back to your
+original tab and it will continue where you were.
+
+**Sign out** (top right) ends your session and clears the form.
 
 ## 2. Fill out the form
 
 <ParamField path="Your Name" required>
-  Pick yourself from the dropdown. Your email fills in automatically, and you
-  are added as a **follower** on the Asana task so you get notified when the
+  Pick yourself from the dropdown. On your first visit it's pre-selected if
+  your sign-in email matches the staff list. You are added as a **follower** on the Asana task so you get notified when the
   deacons respond.
 </ParamField>
 
 <ParamField path="Your Email">
-  Auto-filled from your name. Edit it if you want replies somewhere else.
+  Read-only — this is the email you **signed in with**, and it's what the task
+  records as the submitter. To use a different address, sign out and sign in
+  with that one. Asana notifications go to your Asana account as a follower.
 </ParamField>
 
 <ParamField path="Request Title" required>

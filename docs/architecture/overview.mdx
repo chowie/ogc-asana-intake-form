@@ -4,8 +4,10 @@ description: "The stage machine, the request path, and why it's shaped this way.
 icon: "sitemap"
 ---
 
-React SPA on Netlify, with four Netlify Functions holding every credential. The
-browser never sees a token, a key, or the passphrase itself.
+React SPA on Netlify. Netlify Functions hold every credential: three for the
+request flow and six for accounts and sign-in. Upstash Redis stores accounts and
+sessions. The browser never sees an API key, and its session is an `HttpOnly`
+cookie that page scripts can't read.
 
 ## Request path
 
@@ -14,20 +16,23 @@ sequenceDiagram
     participant U as Staff
     participant A as React app
     participant F as Netlify Functions
+    participant R as Upstash Redis
     participant C as Anthropic
     participant S as Asana
 
-    U->>A: passphrase
-    A->>F: POST verify-passphrase
-    F-->>A: { valid, token, expiresAt }
+    A->>F: GET session (cookie)
+    F->>R: GETEX sess:<hash>, GET user:<email>
+    F-->>A: { authenticated, email, canInvite }
+    Note over U,A: if signed out: magic link or Google → login sets ogc_session cookie
     U->>A: form submit
-    A->>F: POST chat (formData, token)
+    A->>F: POST chat (formData, cookie)
+    F->>R: check + slide session
     F->>C: messages + respond tool
     C-->>F: needs_clarification | clear | summarized
     F-->>A: parsed tool input
     Note over U,A: up to 3 questions, then summary
     U->>A: Confirm
-    A->>F: POST create-task (token)
+    A->>F: POST create-task (cookie)
     F->>S: POST /tasks
     S-->>F: task gid + permalink
     A->>F: POST attach-task (optional)
@@ -51,8 +56,11 @@ Editability is a **positive allowlist** (`FORM` or `ERROR`) rather than a
 denylist, so any stage added later is frozen by default instead of silently
 editable.
 
-Authentication sits outside the reducer as a single `authenticated` boolean —
-it's a gate, not a stage.
+Authentication sits outside the reducer as `session` state (`undefined` while
+loading, `null` when signed out, else `{ email, canInvite }`). It's a gate, not a
+stage. Keeping it outside the reducer means a 401 can drop the user to the
+sign-in screen while the reducer keeps their in-progress request for after they
+sign in again.
 
 ## Loop controls
 
@@ -86,11 +94,19 @@ would invite a resubmit and a duplicate task.
     secrets. Anything in the client bundle is public. The functions are thin
     proxies whose only job is holding those credentials and validating input.
   </Accordion>
-  <Accordion title="Why a shared passphrase rather than real accounts?">
-    The audience is roughly six church staff. SSO or per-user accounts would add
-    an identity provider, a user store, and a password-reset flow to a form that
-    is submitted a handful of times a month. The passphrase gates casual access;
-    the signed token stops direct POSTs against the functions.
+  <Accordion title="Why invite-only individual accounts, and why Redis?">
+    The app first used one shared passphrase. That couldn't revoke one person
+    without changing it for everyone, couldn't tell who was signed in, and
+    leaked to anyone a staff member forwarded it to. Individual accounts fix
+    all three. They are invite-only because the audience is a small, known
+    group, so nobody needs to sign up on their own. They are passwordless
+    (email link or Google), so there are no passwords to store, reset, or
+    reuse.
+
+    Upstash Redis was already there for rate limiting. Its key TTLs cover what
+    auth needs: expiring invites, one-time links, and a sliding 30-minute
+    session. It adds no new service, no schema, and no cron job for cleanup.
+    See [Authentication](/architecture/authentication).
   </Accordion>
   <Accordion title="Why bake the roster in at build time?">
     Covered fully in [Roster](/architecture/roster) — the short version is zero

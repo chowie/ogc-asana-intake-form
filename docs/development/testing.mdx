@@ -1,6 +1,6 @@
 ---
 title: "Testing"
-description: "Vitest + Testing Library. 78 tests across 9 files."
+description: "Vitest + Testing Library. 128 tests across 10 files."
 icon: "flask"
 ---
 
@@ -17,14 +17,15 @@ file is `src/test/setup.js`.
 
 | File | Tests | Covers |
 |---|--:|---|
-| `src/__tests__/IntakeForm.test.jsx` | 19 | Email pre-fill, validation, submit payload, frozen/submitting/apiError states, file accept/reject/clear, self-assignment reset, `localStorage` persistence, `initialData` re-population |
+| `netlify/functions/__tests__/auth-flow.test.js` | 40 | End-to-end auth against an in-memory Redis: `create-invite` (401/403, emailed vs copy-only, hash-only storage, 409, 422); `register` (mismatch doesn't consume, case-insensitive match, one-time, 48 h expiry boundary, pending until confirmed, Google match/mismatch/invalid); `verify-email` (activation + session, one-time, resend); `login` (no enumeration, inviter bootstrap, magic link one-time + 15 min, Google active-only, 415 without JSON); session lifetime (30-min sliding expiry, guard slides too, `canInvite`, logout, revoke by deleting the user, fails closed without Redis, forged cookie); security-review regressions (confirmation link can't re-activate a `disabled` account, a disabled inviter isn't re-provisioned, pending accounts expire with the confirmation window, display-name/quoted email syntax rejected, stored values survive Upstash-style deserialization, re-inviting a disabled account does not revive it) |
+| `src/__tests__/App.test.jsx` | 24 | Auth gating (no session / session check fails / signed in), no auth state in `localStorage`, sign out, Google sign-in; 401 from chat or `createTask` drops to sign-in and keeps the request; sign-in in another tab resumes on focus; `/invite`, `/verify`, `/login` routes (token stripped from URL, spent only on click, app locked until confirmed, mismatch error); Invite button for inviters only, emailed and copy-only invites; chat error paths, clear → summarized recursion, confirm flow, double-click guard, attachment-failure warning |
+| `src/__tests__/IntakeForm.test.jsx` | 20 | Read-only account email + roster name pre-select, validation, submit payload, frozen/submitting/apiError states, file accept/reject/clear, self-assignment reset, `localStorage` persistence, `initialData` re-population |
 | `src/__tests__/PhilipChat.test.jsx` | 14 | Header, message rendering, typing indicator, send on click/Enter, input cleared, disabled during AI wait, summary panel show/hide, confirm/edit |
-| `src/__tests__/App.test.jsx` | 10 | Auth gating (no token / expired / valid), chat error paths, clear → summarized recursion, confirm flow, double-click guard, attachment-failure warning |
-| `src/__tests__/PassphraseGate.test.jsx` | 8 | Render, success callback, token (not passphrase) stored, wrong-passphrase error, `!ok` and network failures, button disabled while checking, error clears on re-type |
-| `netlify/functions/_shared/__tests__/auth.test.js` | 9 | Token issue/verify, tampering, wrong secret, expiry, missing `AUTH_SECRET` fails closed, `requireAuth` 403 |
-| `netlify/functions/__tests__/create-task.test.js` | 6 | Auth guard, unknown follower/assignee GID rejection, empty-summary rejection, details fallback, notes built from a complete summary |
-| `netlify/functions/__tests__/chat.test.js` | 5 | Auth guard, `needs_clarification` passthrough, 502 on `summarized` with a missing summary, 200 on a complete summary, user fields kept out of the system prompt |
-| `netlify/functions/__tests__/attach-task.test.js` | 5 | Auth guard, MIME allowlist (415), size cap (413), out-of-project task rejection (403), successful upload |
+| `netlify/functions/_shared/__tests__/google.test.js` | 8 | Real `jose` verification with locally generated keys: valid token, wrong audience, wrong issuer, unknown key, expired, unverified email, `GOOGLE_CLIENT_ID` unset, garbage |
+| `netlify/functions/__tests__/create-task.test.js` | 8 | Session guard (401), unknown follower/assignee GID rejection, empty-summary rejection, details fallback, notes built from a complete summary, submitter email taken from the session (spoofed `submitterEmail` ignored), non-JSON content type (415) |
+| `netlify/functions/_shared/__tests__/timing.test.js` | 2 | `padTo()` waits out the rest of the response floor, and doesn't wait once the floor has passed |
+| `netlify/functions/__tests__/chat.test.js` | 5 | Session guard (401), `needs_clarification` passthrough, 502 on `summarized` with a missing summary, 200 on a complete summary, user fields kept out of the system prompt |
+| `netlify/functions/__tests__/attach-task.test.js` | 5 | Session guard (401), MIME allowlist (415), size cap (413), out-of-project task rejection (403), successful upload |
 | `data/__tests__/roster-placeholder.test.js` | 2 | Guards against committing real PII in `data/roster.json` |
 
 ## Patterns used
@@ -38,8 +39,25 @@ const { STAFF } = vi.hoisted(() => ({ STAFF: [/* fixtures */] }))
 vi.mock('../config/staff.js', () => ({ STAFF, findStaff: (n) => ... }))
 ```
 
-**Mocking fetch.** `vi.stubGlobal('fetch', ...)` — used in
-`PassphraseGate.test.jsx` and the function tests.
+**Mocking fetch.** `vi.stubGlobal('fetch', ...)` is used in `App.test.jsx` and
+the function tests. In `auth-flow.test.js`, it also captures the outgoing Resend
+calls, so tests can pull the token out of the "sent" email
+(`tokenFromLastEmail`).
+
+**Fake Redis.** `netlify/functions/__tests__/helpers/fake-redis.js` is a small
+in-memory stand-in for the `@upstash/redis` client. It covers only the commands
+the auth code uses (`get`, `set` with `ex`, `getex`, `getdel`, `del`). It also
+mimics Upstash serialization: strings are stored raw, everything else as JSON,
+and every read is `JSON.parse`d with a raw-string fallback. That way, tests
+catch values that wouldn't round-trip through the real client. Tests
+swap it in with `vi.mock('../_shared/redis.js')`. TTLs read `Date.now()`, so
+`vi.setSystemTime` / `vi.advanceTimersByTime` drive expiry. `seedSession()`
+creates an active user plus a session and returns the cookie. The
+`create-task`, `chat`, and `attach-task` tests use it.
+
+**Google.** `auth-flow.test.js` mocks `verifyGoogleIdToken`, where
+`"google:<email>"` stands in for a valid token. `google.test.js` runs the real
+`jose` verification against locally generated keys.
 
 **The PII guard.** `data/__tests__/roster-placeholder.test.js` fails the build if
 `data/roster.json` looks like real staff data rather than the placeholder. This
@@ -53,5 +71,6 @@ exists because real names, emails, and Asana GIDs were committed once already.
 
 ## What isn't covered
 
-No end-to-end tests. The Asana and Anthropic APIs are mocked at the `fetch`
-boundary in every test — nothing in CI hits a live API.
+No browser end-to-end tests. The Asana, Anthropic, and Resend APIs are mocked at
+the `fetch` boundary, and Redis is the in-memory fake. Nothing in CI hits a live
+service. The Google button itself (Google's script) isn't exercised.

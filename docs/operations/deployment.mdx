@@ -32,50 +32,109 @@ netlify deploy --build --prod   # production
 
 ## Environment variables
 
-**Site configuration → Environment variables.** All ten:
+**Site configuration → Environment variables.**
 
 | Variable | Required? |
 |---|---|
-| `PASSPHRASE` | Yes |
-| `AUTH_SECRET` | Yes |
+| `UPSTASH_REDIS_REST_URL` | Yes. Accounts and sessions live here, and sign-in fails closed without it |
+| `UPSTASH_REDIS_REST_TOKEN` | Yes, same |
+| `INVITER_EMAILS` | Yes. Without it nobody can invite or bootstrap |
+| `RESEND_API_KEY` | Yes. Needed for invite, confirmation, and sign-in emails |
+| `EMAIL_FROM` | Yes. Must be on a domain verified in Resend |
 | `ASANA_PAT` | Yes |
 | `ASANA_PROJECT_GID` | Yes |
 | `ASANA_INBOX_SECTION_GID` | Yes |
 | `ANTHROPIC_API_KEY` | Yes |
-| `NOTION_TOKEN` | Build-time — without it, the placeholder roster ships |
-| `NOTION_ROSTER_DB_ID` | Build-time — same |
-| `UPSTASH_REDIS_REST_URL` | Optional — no rate limiting without it |
-| `UPSTASH_REDIS_REST_TOKEN` | Optional — same |
-
-Details in [Environment variables](/development/environment-variables).
+| `GOOGLE_CLIENT_ID` | Optional. Enables Google sign-in (server side) |
+| `VITE_GOOGLE_CLIENT_ID` | Optional. Same value, baked into the build to show the button |
+| `APP_URL` | Optional. Set it in the **Deploy Previews** context only, so emailed links from a preview point at the preview |
+| `NOTION_TOKEN` | Build-time. Without it, the placeholder roster ships |
+| `NOTION_ROSTER_DB_ID` | Build-time, same |
 
 <Warning>
-  Changing an environment variable does **not** redeploy the site. Functions pick
-  up new values on the next invocation, but anything baked in at build time (the
-  roster) needs a rebuild: **Deploys → Trigger deploy → Clear cache and deploy
-  site**.
+  **Scope the account variables by context.** Set `UPSTASH_REDIS_REST_URL`,
+  `UPSTASH_REDIS_REST_TOKEN`, `RESEND_API_KEY`, and `INVITER_EMAILS` for the
+  **Production** context only, or give Deploy Previews and branch deploys a
+  **separate** Upstash database. If they're shared, preview builds of
+  unreviewed branches run against production accounts and sessions, and can
+  send email as the church.
 </Warning>
+
+Details in [Environment variables](/development/environment-variables). Don't
+set `URL`. Netlify provides it, and it is used for emailed links and the
+cookie's `Secure` flag.
+
+<Warning>
+  Changing an environment variable does **not** redeploy the site, and the
+  change doesn't reach functions or the build until the **next deploy**. That
+  includes adding or removing someone in `INVITER_EMAILS`. After a change, go
+  to **Deploys → Trigger deploy → Deploy site**. Use **Clear cache and deploy
+  site** if the roster or `VITE_GOOGLE_CLIENT_ID` changed.
+</Warning>
+
+### Email (Resend)
+
+<Steps>
+  <Step title="Add your domain">
+    In [Resend → Domains](https://resend.com/domains), add the domain you'll
+    send from (a subdomain like `mail.your-church.org` works well).
+  </Step>
+  <Step title="Add the DNS records">
+    Resend lists SPF (`TXT`/`MX`) and DKIM records. Add them at your DNS
+    provider, then wait until Resend shows the domain as **Verified**.
+  </Step>
+  <Step title="Create an API key">
+    Use **Sending access** only. Set it as `RESEND_API_KEY`.
+  </Step>
+  <Step title="Set the sender">
+    `EMAIL_FROM` = `OGC Deacons <noreply@that-domain>`.
+  </Step>
+</Steps>
+
+### Google sign-in (optional)
+
+Create a Web OAuth client ID and add the production URL to **Authorized
+JavaScript origins**. The steps are in
+[Environment variables](/development/environment-variables#creating-the-client-id).
+Each deploy-preview URL is a different origin, so Google sign-in won't work on
+previews unless you add that origin too. Email sign-in works on previews.
+
+<Note>
+  Sign in with Apple isn't supported. It needs a $99/year Apple Developer
+  account. It could be added later as another sign-in provider.
+</Note>
 
 ## Post-deploy checks
 
 <Steps>
-  <Step title="Passphrase gate loads">
-    A blank screen or 500 here usually means `PASSPHRASE` or `AUTH_SECRET` is
-    unset.
+  <Step title="The sign-in screen loads">
+    A blank screen usually means the build failed. Check the deploy log.
+  </Step>
+  <Step title="An inviter can sign in">
+    Request a magic link for an `INVITER_EMAILS` address. If nothing arrives,
+    check Resend's **Emails** log and the `login` function log. See
+    [Troubleshooting](/operations/troubleshooting#emails-arent-arriving).
   </Step>
   <Step title="The name dropdown lists real staff">
-    Placeholder names ("Example Staff 1") mean the roster fetch was skipped —
-    check the build log for `[fetch-roster]`.
+    Placeholder names ("Example Staff 1") mean the roster fetch was skipped.
+    Check the build log for `[fetch-roster]`.
   </Step>
   <Step title="Submit a throwaway request end to end">
     Confirms the Anthropic key, the Asana PAT, and both Asana GIDs. Delete the
     task afterward.
   </Step>
-  <Step title="Check the build log for rate-limit warnings">
-    `[rate-limit] Upstash not configured` in production means the site is running
-    unlimited.
+  <Step title="Check the function logs for Redis warnings">
+    `[rate-limit] Upstash not configured` or `[session] lookup failed` in
+    production means Redis is missing or erroring.
   </Step>
 </Steps>
+
+## First deploy: bootstrapping accounts
+
+A new Redis database has no accounts. Put the first deacons' emails in
+`INVITER_EMAILS` and deploy. Each of them signs in with a magic link, which
+creates their account, and then they invite everyone else. See
+[Inviting users](/operations/inviting-users).
 
 ## Rollback
 

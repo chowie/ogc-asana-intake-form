@@ -1,41 +1,142 @@
 ---
 title: "Netlify Functions"
-description: "The four endpoints, their contracts, and their status codes."
+description: "The endpoints, their contracts, and their status codes."
 icon: "server"
 ---
 
-All four live in `netlify/functions/`. Every one rejects non-`POST` with 405 and
-malformed JSON with 400. Shared helpers sit in `_shared/` — the underscore keeps
-Netlify from deploying them as endpoints.
+All live in `netlify/functions/`. Shared helpers sit in `_shared/`. The
+underscore keeps Netlify from deploying them as endpoints.
 
-## verify-passphrase
+There are two groups:
 
-The only unauthenticated endpoint. Issues the session token everything else
-requires.
+- **Request flow:** `chat`, `create-task`, `attach-task`. These require a
+  session and return **401** without one. They reject non-`POST` with 405, a
+  non-JSON `Content-Type` with 415 (the CSRF guard), and malformed JSON with
+  400.
+- **Accounts:** `session`, `login`, `register`, `verify-email`,
+  `create-invite`, `logout`. Every one except `session` (a `GET`) is a `POST`
+  with the same 405/415/400 checks. Auth **fails closed** without Redis:
+  `login`, `register`, and `verify-email` return 503, `session` reports
+  signed out, and anything behind `requireSession` returns 401.
+
+Every session check (`requireSession` / `getSession`) slides the 30-minute
+session TTL. See [Authentication](/architecture/authentication).
+
+## session
+
+`GET`. Tells the client who is signed in. The `HttpOnly` cookie is invisible to
+JS. It counts as activity.
+
+```json Response 200
+{ "authenticated": true, "email": "you@example.com", "canInvite": false }
+```
+
+Signed out (or Redis down): `{ "authenticated": false }`, still 200.
+
+## login
+
+One endpoint with three modes, chosen by which field is in the body:
 
 <CodeGroup>
-```json Request
-{ "passphrase": "..." }
+```json Request a magic link
+{ "email": "you@example.com" }
 ```
 
-```json Response 200 (valid)
-{ "valid": true, "token": "1753900000000.Ab3xY.sig", "expiresAt": 1753900000000 }
+```json Redeem a magic link
+{ "loginToken": "<43-char token from /login?token=>" }
 ```
 
-```json Response 200 (invalid)
-{ "valid": false }
+```json Google
+{ "googleCredential": "<Google ID token>" }
 ```
 </CodeGroup>
 
+| Mode | Success | Errors |
+|---|---|---|
+| `email` | 200 `{ sent: true }`, **always**, account or not, padded to a 1 s minimum. The link is emailed only if `canSignIn` passes | 422 invalid email · 429 over 5 / 10 min |
+| `loginToken` | 200 `{ authenticated, email, canInvite }` + `Set-Cookie` | 410 expired/used/malformed · 429 over 10 / min |
+| `googleCredential` | 200 same as above + `Set-Cookie` | 401 unverifiable token · 403 no active account · 429 over 10 / min |
+
+`canSignIn(email)` passes for `active` accounts. An `INVITER_EMAILS` address
+with **no record at all** is provisioned `active` on the spot. A record with
+any other status (`pending`, `disabled`) fails, even for an inviter. If
+the email fails to send, the error is logged and the response is still
+`{ sent: true }`.
+
+## register
+
+<CodeGroup>
+```json Email
+{ "inviteToken": "...", "email": "new@example.com" }
+```
+
+```json Google
+{ "inviteToken": "...", "googleCredential": "<Google ID token>" }
+```
+</CodeGroup>
+
+```json Response 200
+{ "pending": true, "email": "new@example.com", "emailSent": true }
+```
+
 | Code | When |
 |---|---|
-| 200 | Always for a well-formed attempt — `valid` carries the result |
-| 429 | Over 5 requests/min from this IP |
-| 500 | `PASSPHRASE` or `AUTH_SECRET` unset |
+| 200 | Invite consumed, user saved as `pending` with a 24 h TTL, confirmation emailed (`emailSent: false` if Resend failed) |
+| 401 | Google credential couldn't be verified |
+| 409 | That email already has an `active` account |
+| 410 | Invite token malformed, expired, or already used |
+| 422 | Invalid email (must be a bare address), or email/Google email doesn't match the invite (**invite not consumed**) |
+| 429 | Over 10 requests/min from this IP |
 
-Comparison uses `crypto.timingSafeEqual`, not `===`. A wrong passphrase returns
-**200 with `valid: false`**, not 401 — the client distinguishes "wrong
-passphrase" from "server broken" by the body, not the status.
+The email match is checked before `GETDEL`, so a typo doesn't use up the
+invite. `GETDEL` makes consumption atomic: when two submits race, only one
+succeeds.
+
+## verify-email
+
+<CodeGroup>
+```json Confirm
+{ "token": "<from /verify?token=>" }
+```
+
+```json Resend
+{ "resend": "new@example.com" }
+```
+</CodeGroup>
+
+| Mode | Success | Errors |
+|---|---|---|
+| `token` | 200 `{ authenticated, email, canInvite }` + `Set-Cookie`. A `pending` account becomes `active` (with `verifiedAt`, and the TTL removed). An already-active account just gets a session | 410 expired/used, account gone, or any other status such as `disabled` · 429 over 10 / min |
+| `resend` | 200 `{ ok: true }` **always**, padded to a 1 s minimum. A new link is sent only if the account is `pending` | 429 over 3 / 10 min |
+
+## create-invite
+
+Requires a session **and** an inviter email.
+
+```json Request
+{ "email": "new@example.com", "sendEmail": true }
+```
+
+```json Response 200
+{ "link": "https://…/invite?token=…", "expiresAt": 1754000000000, "emailSent": true }
+```
+
+| Code | When |
+|---|---|
+| 200 | Invite stored for 48 h. `emailSent` is false if `sendEmail: false` or Resend failed. The link is returned either way |
+| 401 | No live session |
+| 403 | Signed in, but not in `INVITER_EMAILS` |
+| 409 | That email already has an `active` account |
+| 422 | Invalid email |
+| 429 | Over 20 invites/hour from this IP |
+
+Inviting a `pending` user is allowed. Use it to re-invite someone whose
+confirmation lapsed.
+
+## logout
+
+`POST {}`. Deletes `sess:<hash>` and returns a `Set-Cookie` with `Max-Age=0`.
+Returns 200 `{ ok: true }`.
 
 ## chat
 
@@ -44,8 +145,7 @@ Proxies the conversation to the Anthropic API as Philip.
 ```json Request
 {
   "formData": { "title": "...", "details": "...", "dueDate": "...", "submitterName": "..." },
-  "messages": [{ "role": "user", "content": "..." }],
-  "passphraseToken": "..."
+  "messages": [{ "role": "user", "content": "..." }]
 }
 ```
 
@@ -61,7 +161,8 @@ Response is the validated tool input, one of:
 |---|---|
 | 200 | Valid tool response |
 | 400 | `formData` missing or `messages` not an array |
-| 403 | Invalid or missing token |
+| 401 | No live session |
+| 415 | `Content-Type` isn't `application/json` |
 | 429 | Over 20 requests/min from this IP |
 | 502 | Anthropic error, unparseable response, or `summarized` with an incomplete summary |
 | 504 | Anthropic exceeded the 9-second timeout |
@@ -92,23 +193,27 @@ this.
 ```json Request
 {
   "title": "...", "details": "...", "dueDate": "2026-08-01",
-  "submitterName": "...", "submitterEmail": "...",
+  "submitterName": "...",
   "followerGid": "...", "assigneeGid": null,
-  "summary": { "what": "...", "...": "..." },
-  "passphraseToken": "..."
+  "summary": { "what": "...", "...": "..." }
 }
 ```
 
 | Code | When |
 |---|---|
 | 200 | Task created — returns the Asana payload with `name` and `permalink_url` |
-| 403 | Invalid token |
+| 401 | No live session |
+| 415 | `Content-Type` isn't `application/json` |
 | 422 | Missing required fields, or a `followerGid`/`assigneeGid` not in the roster |
 | 502 | Asana unreachable |
 | 504 | Asana exceeded the 8-second timeout |
 | *pass-through* | Asana's own status on an API error |
 
-Two validations worth noting:
+Three validations worth noting:
+
+**Attribution from the session.** The "Submitted by" line uses the session's
+email. Any `submitterEmail` in the body is ignored, so a caller can't file a task
+under someone else's address.
 
 **Summary-or-details.** The task body is built from the five-field summary when
 it's complete, otherwise from raw `details`. An empty `{}` summary is rejected
@@ -121,21 +226,22 @@ could add any workspace user as a follower and spam them with notifications.
 ## attach-task
 
 ```json Request
-{ "taskGid": "...", "fileName": "quote.pdf", "mimeType": "application/pdf", "fileData": "<base64>", "passphraseToken": "..." }
+{ "taskGid": "...", "fileName": "quote.pdf", "mimeType": "application/pdf", "fileData": "<base64>" }
 ```
 
 | Code | When |
 |---|---|
 | 200 | Attachment created |
 | 400 | Missing `taskGid`, `fileName`, or `fileData` |
-| 403 | Invalid token, task not found, or task not in the allowed project |
+| 401 | No live session |
+| 403 | Task not found, or task not in the allowed project |
 | 413 | Decoded size over 1 MB |
-| 415 | MIME type not in the allowlist |
+| 415 | Request `Content-Type` isn't `application/json`, or file MIME type not in the allowlist |
 | 502 / 504 | Asana unreachable / timed out |
 
 **Project preflight.** The Asana PAT is workspace-scoped, so before attaching,
 the handler `GET`s the task and confirms `ASANA_PROJECT_GID` is among its
-projects. Otherwise a caller with a valid session token could attach files to any
+projects. Otherwise a signed-in caller could attach files to any
 task in the workspace.
 
 **Size is checked twice.** The client caps at 700 KB; the server caps the decoded
@@ -144,16 +250,16 @@ length rather than allocating the buffer first.
 
 ## Shared helpers
 
-<CardGroup cols={3}>
-  <Card title="_shared/auth.js" icon="key">
-    `issueToken` / `verifyToken` / `requireAuth`. See
-    [Authentication](/architecture/authentication).
-  </Card>
-  <Card title="_shared/rate-limit.js" icon="gauge">
-    Per-IP `limit()` backed by Upstash. Fails open. See
-    [Rate limiting](/operations/rate-limiting).
-  </Card>
-  <Card title="_shared/roster.js" icon="users">
-    `isValidGid()` — the roster-derived GID allowlist.
-  </Card>
-</CardGroup>
+| File | Exports |
+|---|---|
+| `_shared/redis.js` | `getRedis()`: the shared Upstash client, or `null` when `UPSTASH_*` is unset |
+| `_shared/tokens.js` | `newToken()` (32 random bytes, base64url), `hashToken()` (SHA-256), `isTokenShape()` |
+| `_shared/session.js` | `createSession`, `getSession`, `requireSession` (401 guard), `destroySession`. Owns the `ogc_session` cookie |
+| `_shared/users.js` | `normalizeEmail`, `isValidEmail`, `isInviter`, `getUser`, `saveUser`, `canSignIn` |
+| `_shared/verification.js` | `sendConfirmation()`: issues a `verify:` token and emails it |
+| `_shared/email.js` | `sendEmail()` via the Resend REST API (10 s timeout), plus invite/confirm/login templates |
+| `_shared/google.js` | `verifyGoogleIdToken()`: checks the ID token against Google's JWKS with `jose` |
+| `_shared/http.js` | `json()`, `requireJsonContentType()` (415), `parseJsonPost()` (405/415/400), `appUrl()` (`APP_URL` → `URL` → localhost) |
+| `_shared/timing.js` | `padTo()` / `RESPONSE_FLOOR_MS`: minimum response time for enumeration-sensitive responses (`AUTH_RESPONSE_FLOOR_MS`, default 1000) |
+| `_shared/rate-limit.js` | Per-IP `limit()`. Fails open. See [Rate limiting](/operations/rate-limiting) |
+| `_shared/roster.js` | `isValidGid()`: the roster-derived GID allowlist |
