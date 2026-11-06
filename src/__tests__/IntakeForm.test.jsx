@@ -33,32 +33,36 @@ beforeEach(() => {
   localStorage.clear()
 })
 
-describe('IntakeForm — email pre-fill', () => {
-  it('pre-fills email when Test User One is selected', async () => {
-    renderForm()
-    await userEvent.selectOptions(screen.getByLabelText(/your name/i), 'Test User One')
-    expect(screen.getByLabelText(/your email/i)).toHaveValue('one@example.com')
+describe('IntakeForm — account email (read-only)', () => {
+  it('shows the signed-in email, read-only', () => {
+    renderForm({ accountEmail: 'me@example.com' })
+    const input = screen.getByLabelText(/your email/i)
+    expect(input).toHaveValue('me@example.com')
+    expect(input).toHaveAttribute('readonly')
   })
 
-  it('pre-fills email when Test User Two is selected', async () => {
-    renderForm()
+  it('does not change when a different name is selected', async () => {
+    renderForm({ accountEmail: 'me@example.com' })
     await userEvent.selectOptions(screen.getByLabelText(/your name/i), 'Test User Two')
-    expect(screen.getByLabelText(/your email/i)).toHaveValue('two@example.com')
+    expect(screen.getByLabelText(/your email/i)).toHaveValue('me@example.com')
   })
 
-  it('pre-fills email when Test User Three is selected', async () => {
-    renderForm()
-    await userEvent.selectOptions(screen.getByLabelText(/your name/i), 'Test User Three')
-    expect(screen.getByLabelText(/your email/i)).toHaveValue('three@example.com')
+  it('cannot be typed into', async () => {
+    renderForm({ accountEmail: 'me@example.com' })
+    const input = screen.getByLabelText(/your email/i)
+    await userEvent.type(input, 'spoof')
+    expect(input).toHaveValue('me@example.com')
   })
 
-  it('allows the pre-filled email to be edited', async () => {
-    renderForm()
-    await userEvent.selectOptions(screen.getByLabelText(/your name/i), 'Test User One')
-    const emailInput = screen.getByLabelText(/your email/i)
-    await userEvent.clear(emailInput)
-    await userEvent.type(emailInput, 'custom@example.com')
-    expect(emailInput).toHaveValue('custom@example.com')
+  it('pre-selects the roster name matching the account email on first visit', () => {
+    renderForm({ accountEmail: 'Three@Example.com' })
+    expect(screen.getByLabelText(/your name/i)).toHaveValue('Test User Three')
+  })
+
+  it('a remembered name wins over the account-email match', () => {
+    localStorage.setItem('ogc_last_submitter', JSON.stringify({ name: 'Test User Two' }))
+    renderForm({ accountEmail: 'three@example.com' })
+    expect(screen.getByLabelText(/your name/i)).toHaveValue('Test User Two')
   })
 })
 
@@ -82,7 +86,7 @@ describe('IntakeForm — validation', () => {
 
 describe('IntakeForm — onSubmit payload', () => {
   it('calls onSubmit with correct payload including followerGid', async () => {
-    const { onSubmit } = renderForm()
+    const { onSubmit } = renderForm({ accountEmail: 'me@example.com' })
     await fillRequiredFields('Test User One', 'Fix the heater', 'The fellowship hall heater is broken.')
     await userEvent.type(screen.getByLabelText(/due date/i), '2026-06-01')
     await userEvent.click(screen.getByRole('button', { name: /submit request/i }))
@@ -90,7 +94,7 @@ describe('IntakeForm — onSubmit payload', () => {
     expect(onSubmit).toHaveBeenCalledOnce()
     const [args] = onSubmit.mock.calls[0]
     expect(args.submitterName).toBe('Test User One')
-    expect(args.submitterEmail).toBe('one@example.com')
+    expect(args.submitterEmail).toBe('me@example.com') // from the session, not the roster
     expect(args.title).toBe('Fix the heater')
     expect(args.details).toBe('The fellowship hall heater is broken.')
     expect(args.dueDate).toBe('2026-06-01')
@@ -140,18 +144,17 @@ describe('IntakeForm — apiError prop', () => {
 })
 
 describe('IntakeForm — name/email persistence', () => {
-  it('saves name and email to localStorage when a name is selected', async () => {
+  it('saves only the name to localStorage when a name is selected', async () => {
     renderForm()
     await userEvent.selectOptions(screen.getByLabelText(/your name/i), 'Test User One')
     const stored = JSON.parse(localStorage.getItem('ogc_last_submitter'))
-    expect(stored).toEqual({ name: 'Test User One', email: 'one@example.com' })
+    expect(stored).toEqual({ name: 'Test User One' })
   })
 
-  it('pre-populates name and email from localStorage on mount', () => {
+  it('pre-populates the name from localStorage on mount', () => {
     localStorage.setItem('ogc_last_submitter', JSON.stringify({ name: 'Test User Two', email: 'two@example.com' }))
     renderForm()
     expect(screen.getByLabelText(/your name/i)).toHaveValue('Test User Two')
-    expect(screen.getByLabelText(/your email/i)).toHaveValue('two@example.com')
   })
 })
 
@@ -223,7 +226,7 @@ describe('IntakeForm — initialData prop', () => {
         dueDate: '2026-07-01',
       },
     })
-    expect(screen.getByLabelText(/your email/i)).toHaveValue('two@example.com')
+    expect(screen.getByLabelText(/your name/i)).toHaveValue('Test User Two')
     expect(screen.getByLabelText(/request title/i)).toHaveValue('Pre-filled title')
     expect(screen.getByLabelText(/request details/i)).toHaveValue('Pre-filled details')
   })

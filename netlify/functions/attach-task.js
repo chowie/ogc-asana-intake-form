@@ -1,4 +1,5 @@
-import { requireAuth } from './_shared/auth.js'
+import { requireSession } from './_shared/session.js'
+import { requireJsonContentType } from './_shared/http.js'
 
 const ASANA_BASE = 'https://app.asana.com/api/1.0'
 
@@ -26,6 +27,10 @@ export async function handler(event) {
     return { statusCode: 405, body: 'Method Not Allowed' }
   }
 
+  // JSON-only (forces a CORS preflight) — CSRF defense alongside SameSite=Strict.
+  const badType = requireJsonContentType(event)
+  if (badType) return badType
+
   let body
   try {
     body = JSON.parse(event.body ?? '{}')
@@ -37,8 +42,9 @@ export async function handler(event) {
     }
   }
 
-  const forbidden = requireAuth(body)
-  if (forbidden) return forbidden
+  // Session check — also slides the 30-minute inactivity window.
+  const session = await requireSession(event)
+  if (session.error) return session.error
 
   const { taskGid, fileName, mimeType, fileData } = body
   if (!taskGid || !fileName || !fileData) {

@@ -1,4 +1,5 @@
-import { requireAuth } from './_shared/auth.js'
+import { requireSession } from './_shared/session.js'
+import { requireJsonContentType } from './_shared/http.js'
 import { limit } from './_shared/rate-limit.js'
 
 const SYSTEM_PROMPT_BASE = `You are Philip, a warm and helpful AI assistant for Oneida Gospel Church. Your job is to make sure requests submitted to the Deacon board are clear, specific, and actionable — so the deacons have everything they need to help without having to chase down missing details. You ask one short, plain-language question at a time. You never use jargon or overly formal language. You are patient and encouraging.
@@ -48,6 +49,10 @@ export async function handler(event) {
     return { statusCode: 405, body: 'Method Not Allowed' }
   }
 
+  // JSON-only (forces a CORS preflight) — CSRF defense alongside SameSite=Strict.
+  const badType = requireJsonContentType(event)
+  if (badType) return badType
+
   let body
   try {
     body = JSON.parse(event.body ?? '{}')
@@ -59,8 +64,9 @@ export async function handler(event) {
     }
   }
 
-  const forbidden = requireAuth(body)
-  if (forbidden) return forbidden
+  // Session check — also slides the 30-minute inactivity window.
+  const session = await requireSession(event)
+  if (session.error) return session.error
 
   const limited = await limit(event, { id: 'chat', max: 20, windowSec: 60 })
   if (limited) return limited

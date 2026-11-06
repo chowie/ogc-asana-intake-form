@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { STAFF, findStaff } from '../config/staff.js'
 
-const BLANK = { name: '', email: '', title: '', details: '', dueDate: '', assigneeGid: '' }
+const BLANK = { name: '', title: '', details: '', dueDate: '', assigneeGid: '' }
 const MAX_FILE_BYTES = 700 * 1024
 const ACCEPTED_TYPES = '.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg'
 
@@ -13,13 +13,17 @@ function validate(form) {
   return errs
 }
 
-export default function IntakeForm({ onSubmit, onFileChange, frozen, submitting, apiError, initialData }) {
+// accountEmail is the signed-in email. It is shown read-only: the server
+// attributes the task to the session, so an editable field would mislead.
+export default function IntakeForm({ onSubmit, onFileChange, frozen, submitting, apiError, initialData, accountEmail = '' }) {
   const [form, setForm] = useState(() => {
     try {
       const stored = JSON.parse(localStorage.getItem('ogc_last_submitter') ?? 'null')
-      if (stored?.name) return { ...BLANK, name: stored.name, email: stored.email ?? '' }
+      if (stored?.name) return { ...BLANK, name: stored.name }
     } catch {}
-    return BLANK
+    // First visit: pre-select the roster entry whose email matches the account.
+    const match = accountEmail && STAFF.find((s) => s.email?.toLowerCase() === accountEmail.toLowerCase())
+    return match ? { ...BLANK, name: match.name } : BLANK
   })
   const [errors, setErrors] = useState({})
   const [selectedFile, setSelectedFile] = useState(null)
@@ -30,7 +34,6 @@ export default function IntakeForm({ onSubmit, onFileChange, frozen, submitting,
       setForm((prev) => ({
         ...prev,
         name: initialData.submitterName ?? prev.name,
-        email: initialData.submitterEmail ?? prev.email,
         title: initialData.title ?? prev.title,
         details: initialData.details ?? prev.details,
         dueDate: initialData.dueDate ?? prev.dueDate,
@@ -42,14 +45,12 @@ export default function IntakeForm({ onSubmit, onFileChange, frozen, submitting,
   const handleNameChange = (e) => {
     const name = e.target.value
     const staff = findStaff(name)
-    const email = staff ? staff.email : ''
     setForm((prev) => ({
       ...prev,
       name,
-      email,
       assigneeGid: prev.assigneeGid === staff?.asanaGid ? '' : prev.assigneeGid,
     }))
-    if (name) localStorage.setItem('ogc_last_submitter', JSON.stringify({ name, email }))
+    if (name) localStorage.setItem('ogc_last_submitter', JSON.stringify({ name }))
     setErrors((prev) => ({ ...prev, name: undefined }))
   }
 
@@ -88,7 +89,7 @@ export default function IntakeForm({ onSubmit, onFileChange, frozen, submitting,
     const staff = findStaff(form.name)
     onSubmit({
       submitterName: form.name,
-      submitterEmail: form.email,
+      submitterEmail: accountEmail,
       title: form.title,
       details: form.details,
       dueDate: form.dueDate || null,
@@ -131,11 +132,14 @@ export default function IntakeForm({ onSubmit, onFileChange, frozen, submitting,
             <input
               id="email"
               type="email"
-              value={form.email}
-              onChange={handleField('email')}
-              placeholder="your@email.com"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              value={accountEmail}
+              readOnly
+              aria-describedby="email-help"
+              className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600 cursor-default focus:outline-none"
             />
+            <p id="email-help" className="mt-1 text-xs text-gray-400">
+              The email you signed in with. Your request is recorded under this address.
+            </p>
           </div>
 
           {/* Title */}

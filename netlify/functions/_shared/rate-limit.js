@@ -1,14 +1,5 @@
 import { Ratelimit } from '@upstash/ratelimit'
-import { Redis } from '@upstash/redis'
-
-let redis = null
-function getRedis() {
-  if (redis) return redis
-  const { UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN } = process.env
-  if (!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN) return null
-  redis = new Redis({ url: UPSTASH_REDIS_REST_URL, token: UPSTASH_REDIS_REST_TOKEN })
-  return redis
-}
+import { getRedis } from './redis.js'
 
 const limiters = new Map()
 function getLimiter(id, max, windowSec) {
