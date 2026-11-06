@@ -1,0 +1,105 @@
+---
+title: "FAQ & troubleshooting"
+description: "Common questions and error messages, in plain language."
+icon: "circle-question"
+---
+
+## Getting in
+
+<AccordionGroup>
+  <Accordion title="How do I get an account?">
+    Ask a deacon for an invitation. Accounts are invitation-only. The invite
+    link works once, only for the email it was sent to, and expires after 48
+    hours. See [Submitting a request](/staff/submitting-a-request#1-sign-in).
+  </Accordion>
+  <Accordion title="My invite link says it has expired or was already used">
+    Invites expire after 48 hours and work once. If you registered but didn't
+    confirm your email within 24 hours, the registration lapses too. Either
+    way, ask the deacon who invited you to send a new one.
+  </Accordion>
+  <Accordion title="It says my email doesn't match the invite">
+    You have to use the exact address the invite was sent to. Capital letters
+    don't matter. With Google, the Google account has to use that address. A
+    mismatch doesn't use up the invite, so correct it and try again.
+  </Accordion>
+  <Accordion title="I never got the confirmation or sign-in email">
+    Check spam, junk, or promotions. Look for a sender called OGC Deacons. On
+    the **Confirm your email** screen you can press **Resend confirmation
+    email**. For a sign-in link, request another one. Sign-in links expire
+    after 15 minutes. If nothing arrives, tell the deacons. The problem is
+    probably on our side.
+  </Accordion>
+  <Accordion title="I asked for a sign-in link but nothing came">
+    For privacy, the screen says "If this email has an account, we've sent it a
+    link" whether or not there's an account. Check that you used the address
+    you registered with, and that you finished confirming your email after
+    registering.
+  </Accordion>
+  <Accordion title="Google sign-in says there's no active account">
+    Google only works for an account that is registered **and** confirmed, with
+    the same email address as your Google account. Finish confirming your email
+    first, or use the emailed sign-in link instead.
+  </Accordion>
+  <Accordion title="I don't see a Google button">
+    The site may not have Google sign-in turned on. Use **Email me a sign-in
+    link** instead.
+  </Accordion>
+  <Accordion title="It signed me out in the middle of a request">
+    Sessions end after 30 minutes without activity. Your request is still
+    there: sign in again and submit it. If the sign-in link opened in a new
+    tab, switch back to your original tab and it continues where you left off.
+  </Accordion>
+  <Accordion title="My name isn't in the dropdown">
+    The staff list comes from the church's Notion roster. Ask the office to add
+    you — see [Roster management](/operations/roster-management). The list
+    updates on the next site rebuild, not instantly.
+  </Accordion>
+</AccordionGroup>
+
+## Filling out the form
+
+<AccordionGroup>
+  <Accordion title="Can I assign the request to myself?">
+    No — you're automatically added as a **follower**, which is what gets you
+    notifications. The assignee dropdown deliberately excludes you.
+  </Accordion>
+  <Accordion title="Do I have to pick an assignee?">
+    No. Leave it Unassigned and the deacons will triage it from the Inbox.
+  </Accordion>
+  <Accordion title="Can I edit a request after submitting?">
+    Not from this form. Open the task in Asana from the confirmation link and
+    edit or comment there.
+  </Accordion>
+</AccordionGroup>
+
+## Error messages
+
+| Message | What it means | What to do |
+|---|---|---|
+| "We couldn't reach the assistant." | Network problem or the AI service is down. | Wait a moment and submit again. Your typing is preserved. |
+| "The assistant took too long to respond." | Philip exceeded the time limit. | Submit again. |
+| "We couldn't put your summary together." | Philip failed to produce a usable summary. | Add a bit more detail to the request and resubmit. |
+| "Asana took too long to respond." | Asana was slow or unreachable. | Press Confirm again — no task was created. |
+| "Too many requests." | Rate limit hit. | Wait about a minute. Repeated sign-in link requests are limited more strictly (5 per 10 minutes). |
+| "Your session expired after 30 minutes of inactivity…" (on the sign-in screen) | You were inactive for 30 minutes, or your access was removed. | Sign in again, then resubmit. Your request is kept. |
+| Attachment warning on the success screen | Task created, file upload failed. | Add the file directly in Asana. **Don't resubmit.** |
+
+<Note>
+  The rule of thumb: if you never reached the **confirmation screen**, no task
+  was created and it's safe to try again. If you *did* reach it, the task exists
+  — fix anything else in Asana rather than resubmitting.
+</Note>
+
+## Privacy
+
+<AccordionGroup>
+  <Accordion title="Who can see my request?">
+    Anyone with access to the OGC Deacons Asana project. Your name and the
+    email you signed in with are added to the bottom of the task description.
+  </Accordion>
+  <Accordion title="Is anything stored in my browser?">
+    Your name and email, so the form fills them in next time. Your sign-in is a
+    secure cookie that ends when you sign out, close the browser, or have been
+    inactive for 30 minutes. No request content is kept locally.
+  </Accordion>
+</AccordionGroup>

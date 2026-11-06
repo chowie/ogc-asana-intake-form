@@ -10,11 +10,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "refresh-roster": "node scripts/fetch-roster.mjs",
-    "gen-secret": "node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\""
+    "docs": "cd docs && npx mint@latest dev"
   },
   "dependencies": {
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
+    "jose": "^6.2.15",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

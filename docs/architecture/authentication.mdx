@@ -1,0 +1,269 @@
+---
+title: "Authentication"
+description: "Invite-only, passwordless accounts with server-side sessions in Redis."
+icon: "shield-halved"
+---
+
+Every person has their own account, and nobody has a password. Accounts exist
+only by invitation from a designated inviter. People sign in with an emailed
+one-time link or with Google. The session is an opaque cookie backed by a
+record in Upstash Redis.
+
+<Note>
+  This replaced the old shared-passphrase gate. There is no passphrase, no
+  `AUTH_SECRET`, and nothing auth-related in `localStorage`.
+</Note>
+
+## Roles
+
+| Who | How they get in |
+|---|---|
+| **Inviter** | Email listed in `INVITER_EMAILS`. Can sign in with no invite: if **no `user:` record exists**, the first sign-in creates an `active` account (bootstrap). An existing record is respected as-is, so a `disabled` inviter stays disabled. Sees an **Invite** button in the app header. |
+| **Member** | Anyone else. Needs an invite, then has to confirm their email before the app unlocks. |
+
+`isInviter()` re-reads `INVITER_EMAILS` on every call, so it is checked on each
+request, not stored on the account.
+
+## Account lifecycle
+
+<Steps>
+  <Step title="Invite">
+    An inviter posts to `create-invite` with the invitee's email. The server
+    stores `invite:<sha256(token)>` → `{ email, invitedBy, createdAt }` with a
+    **48-hour** TTL and returns `/invite?token=…`. By default it also emails the
+    link. Inviting someone who already has an `active` account returns 409.
+  </Step>
+  <Step title="Register">
+    The invitee opens the link and either types the invited email
+    (case-insensitive match) or uses **Sign up with Google**, in which case the
+    verified Google email has to match. If it doesn't match, the server returns
+    422 and **the invite is not consumed**, so a typo doesn't cost anything. On
+    a match, the invite is consumed atomically with `GETDEL`, and the account is
+    saved as `pending` **with a 24-hour TTL**. If it isn't confirmed in time,
+    the record expires and the person needs a new invite.
+  </Step>
+  <Step title="Confirm email">
+    The server stores `verify:<sha256(token)>` (**24 hours**) and emails
+    `/verify?token=…`. The **Confirm your email** screen explains the steps and
+    has a **Resend** button. The app stays locked until the link is used. This
+    applies to Google sign-ups too: a pending account can't sign in by any
+    method.
+  </Step>
+  <Step title="Active">
+    Redeeming the confirmation link sets `status: active` and `verifiedAt`,
+    saves the record **without a TTL** (permanent), and starts a session right
+    away. Only `pending` accounts are activated. Any other non-active status
+    (for example `disabled`) returns 410, so an old confirmation link can't
+    bring back a revoked account.
+  </Step>
+</Steps>
+
+## Signing in
+
+<CardGroup cols={2}>
+  <Card title="Email magic link" icon="envelope">
+    `POST login { email }` stores `login:<sha256(token)>` for **15 minutes** and
+    emails `/login?token=…`. The response is `{ sent: true }` whether the account
+    exists or not, and it is padded to a **1-second minimum** so timing doesn't
+    give it away either. The endpoint can't be used to probe for accounts.
+  </Card>
+  <Card title="Google" icon="google">
+    `POST login { googleCredential }` verifies the Google ID token and signs in
+    if `canSignIn(email)` passes. That means `active` accounts, plus inviters
+    who have no record yet (bootstrap). Anyone else gets 403.
+  </Card>
+</CardGroup>
+
+### Links from emails need a click
+
+`/verify` and `/login` pages (`ConfirmToken.jsx`) spend their token **only when
+the button is clicked**, never on page load. Email security scanners
+(Outlook Safe Links, for example) fetch links before the recipient sees them.
+If the page spent the token on load, the scanner would use it up first.
+`/invite` works the same way, because registering takes a form submit.
+
+Emailed links are built from `APP_URL`, falling back to Netlify's `URL`, then
+`http://localhost:8888`. They are never built from the request's `Host` header,
+so a spoofed header can't redirect a link.
+
+As soon as `App.jsx` reads a token from the URL, it calls
+`history.replaceState` to strip it from the address bar and history.
+
+### Tokens
+
+All tokens (invite, verify, login, session) are 32 random bytes, base64url.
+Redis stores only the **SHA-256 hash**. Someone who reads the Redis database
+gets no token they can use. Every one-time token is redeemed with `GETDEL`, so
+two concurrent redemptions can't both succeed.
+
+## Sessions
+
+<ResponseField name="Cookie" type="ogc_session">
+  A random 32-byte id. `HttpOnly; Secure; SameSite=Strict; Path=/`. `Secure` is
+  dropped only when `URL` starts with `http://localhost`. It is a
+  browser-session cookie with no `Max-Age`, so it is cleared when the browser
+  closes.
+</ResponseField>
+
+<ResponseField name="Redis record" type="sess:<sha256(id)> → { email }">
+  Has a 30-minute TTL. Every authenticated request slides the TTL with
+  `GETEX`, so a session **expires 30 minutes after the most recent request**.
+</ResponseField>
+
+These requests count as activity: `GET session`, `create-task`, `chat`,
+`attach-task`, and `create-invite`.
+
+The TTL lives on the server, so protected functions don't send a `Set-Cookie`
+on every response. `getSession()` also reads `user:<email>` on **every**
+request and accepts the session only if `status` is `active`. If you set a
+user's `status` to `"disabled"`, or delete their key, in Upstash, their access
+ends on their next request. See
+[Inviting users](/operations/inviting-users#revoking-access).
+
+### When a session ends mid-request
+
+`create-task`, `chat`, `attach-task`, and `create-invite` return **401** without
+a valid session. They used to return 403. When the app gets a 401:
+
+- It drops to the sign-in screen with the notice *"Your session expired after 30
+  minutes of inactivity. Sign in again, then resubmit — your request is still
+  here."*
+- `App` stays mounted, so the reducer state survives. That includes the form
+  and attached file. After signing in, the person resubmits.
+- While signed out, the tab checks the session again on `focus` and
+  `visibilitychange`. A magic link opens in a **new tab**. When the person
+  switches back to the original tab, it sees the new cookie and picks up where
+  it was, with the unsent request still in place.
+
+**Sign out** calls `logout`, which deletes the Redis session and clears the
+cookie, and it also resets the form.
+
+## Storage
+
+All auth state is in Upstash Redis:
+
+| Key | Value | TTL |
+|---|---|---|
+| `user:<email>` | `{ email, status: "pending" \| "active" \| "disabled", provider: "email" \| "google", invitedBy, createdAt, verifiedAt }` | 24 h while `pending`, none once `active` |
+| `invite:<sha256>` | `{ email, invitedBy, createdAt }` | 48 h |
+| `verify:<sha256>` | `{ email }` | 24 h |
+| `login:<sha256>` | `{ email }` | 15 min |
+| `sess:<sha256>` | `{ email }` | 30 min, sliding |
+
+Values are JSON objects rather than bare strings. `@upstash/redis` runs
+`JSON.parse` on every read, so a bare string that happens to look like JSON
+could come back changed. `disabled` isn't set by any code path. It's the status
+an operator sets by hand to revoke someone.
+
+Emails are normalized (trimmed, lowercased) before they are used in a key. They
+have to be a **bare address** (`name@domain.tld`). Display names, angle
+brackets, and quotes are rejected with 422, so input like
+`x<evil@example.com>` can't be passed through to Resend as a different
+recipient.
+
+<Warning>
+  Redis is **required** for auth. With `UPSTASH_*` unset, auth **fails closed**:
+  `getSession` treats everyone as signed out, so protected functions return
+  401, and the auth endpoints return 503. Rate limiting still fails open. The
+  two behave differently because a misconfigured deploy should lock people out,
+  not let everyone in.
+</Warning>
+
+## Google verification
+
+`_shared/google.js` verifies the ID token with `jose` against Google's JWKS
+(`https://www.googleapis.com/oauth2/v3/certs`). It checks:
+
+- `aud` equals `GOOGLE_CLIENT_ID`
+- `iss` is `accounts.google.com` (with or without `https://`)
+- the signature and expiry
+- `email_verified === true`
+
+If any check fails, or `GOOGLE_CLIENT_ID` is unset, it returns `null` and the
+caller gets 401. No client secret is involved: the browser gets an ID token
+directly from Google Identity Services.
+
+The client reads `VITE_GOOGLE_CLIENT_ID`. If it's unset, `GoogleButton` renders
+nothing, and the app is email-only.
+
+<Note>
+  Sign in with Apple is not supported. It requires a paid Apple Developer
+  account ($99/yr). The account model would support it later as another
+  `provider`.
+</Note>
+
+## CSRF
+
+There are two layers:
+
+1. **`SameSite=Strict`**. The browser doesn't attach the cookie to requests
+   that come from another site.
+2. **`Content-Type: application/json` is required** on every `POST` function:
+   the auth functions, `create-task`, `chat`, and `attach-task`
+   (`requireJsonContentType` returns 415 otherwise). A cross-origin request
+   with a JSON body triggers a CORS preflight, which a plain HTML form post
+   can't pass.
+
+## What this does and doesn't protect
+
+<AccordionGroup>
+  <Accordion title="Stops: direct POSTs against the functions">
+    Without a live session cookie, `chat`, `create-task`, `attach-task`, and
+    `create-invite` return 401. Someone who finds the function URLs can't run
+    up Anthropic charges or spam Asana.
+  </Accordion>
+  <Accordion title="Stops: strangers signing up">
+    You can only register with an invite token for your exact email. Login
+    requests for unknown emails send nothing and get the same response as real
+    ones.
+  </Accordion>
+  <Accordion title="Stops: XSS stealing the session">
+    The cookie is `HttpOnly`, so scripts on the page can't read it. Nothing
+    auth-related is in `localStorage`.
+  </Accordion>
+  <Accordion title="Stops: replaying old links">
+    Every emailed token works once and has a short TTL. Only hashes are stored.
+  </Accordion>
+  <Accordion title="Stops: probing for accounts">
+    `login { email }` and `verify-email { resend }` return the same body
+    whether or not the account exists, and both are padded to a minimum
+    response time (`AUTH_RESPONSE_FLOOR_MS`, default 1000 ms). Without the
+    padding, the extra Redis write and Resend call for a real account would
+    make it measurably slower.
+  </Accordion>
+  <Accordion title="Stops: filing a task under someone else's email">
+    `create-task` takes the submitter email from the **session** and ignores
+    any `submitterEmail` in the body. The task's "Submitted by" line always
+    shows the signed-in account's email.
+  </Accordion>
+  <Accordion title="Does not stop: someone with access to a member's inbox">
+    Anyone who can read a member's email can request a sign-in link for them.
+    This is the usual passwordless tradeoff. Revoke access by setting the
+    user's `status` to `"disabled"`.
+  </Accordion>
+  <Accordion title="Does not fully tie 'Your Name' to the account">
+    The submitter **name** and follower still come from the form's dropdown,
+    validated only against the roster GIDs. The email comes from the session.
+  </Accordion>
+</AccordionGroup>
+
+## Client
+
+`src/lib/auth.js` wraps each function. It never stores anything: the browser
+sends the cookie automatically.
+
+| Export | Calls |
+|---|---|
+| `getSession()` | `GET session` → `{ authenticated, email?, canInvite? }` |
+| `requestLoginLink(email)` / `redeemLoginLink(token)` / `signInWithGoogle(cred)` | `login` |
+| `registerWithEmail(invite, email)` / `registerWithGoogle(invite, cred)` | `register` |
+| `confirmEmail(token)` / `resendConfirmation(email)` | `verify-email` |
+| `createInvite(email, sendEmail)` | `create-invite` |
+| `logout()` | `logout` |
+| `ApiError` | `Error` with `.status`, so callers can detect 401 |
+| `parseAuthRoute()` | Reads `/invite`, `/verify`, `/login` + `?token=` from the URL |
+
+`App.jsx` holds `session` state: `undefined` while the initial check runs,
+`null` when signed out, otherwise `{ email, canInvite }`. Screens:
+`SignIn`, `Register` (→ `CheckEmail`), `ConfirmToken`, and `InvitePanel`,
+sharing `AuthLayout` and `GoogleButton`.

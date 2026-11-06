@@ -1,0 +1,96 @@
+---
+title: "Roster"
+description: "Notion is the source of truth; the build bakes it into the bundle."
+icon: "address-book"
+---
+
+The deacon roster — name, email, Asana GID — lives in a Notion database. At build
+time `scripts/fetch-roster.mjs` pulls it and writes `data/roster.json`, which two
+consumers read:
+
+- `src/config/staff.js` → the `STAFF` dropdown and `findStaff()`
+- `netlify/functions/_shared/roster.js` → `isValidGid()`, the server-side
+  follower/assignee allowlist
+
+One file, two jobs: it populates the UI *and* defines which Asana users a request
+is allowed to touch.
+
+## Notion schema
+
+Property names must match exactly.
+
+| Property | Type | Notes |
+|---|---|---|
+| `Name` | Title | Full name shown in the dropdown |
+| `Email` | Email | Auto-filled in the form |
+| `Asana GID` | Text | Asana user GID — used as follower/assignee |
+| `Active` | Checkbox | Optional. If the property exists, only checked rows are included |
+
+## The fetch script
+
+```bash
+node --env-file=.env scripts/fetch-roster.mjs
+```
+
+<Warning>
+  `npm run refresh-roster` runs the same script **without** `--env-file`, so it
+  won't see credentials from `.env`. Use the full command above locally.
+</Warning>
+
+Behavior:
+
+- **Pages through all results.** Notion caps at 100 rows per request; the script
+  follows `next_cursor` so nobody past row 100 is silently dropped.
+- **Filters** to `Active === true` when the property exists, then drops any row
+  missing name, email, or GID.
+- **Exits 0 with a warning** when `NOTION_TOKEN` or `NOTION_ROSTER_DB_ID` is
+  unset, or when the Notion call fails — the build continues on the committed
+  fallback.
+- **Exits 1** when Notion returned rows but *zero* survived validation. That
+  signature means a property was renamed, and deploying an empty roster would
+  ship a blank staff dropdown. It fails the build instead.
+
+## What's committed
+
+`data/roster.json` in git contains **placeholder data only**:
+
+```json
+[
+  { "name": "Example Staff 1", "email": "staff1@example.com", "asanaGid": "0000000000000001" }
+]
+```
+
+Real names, emails, and Asana GIDs were committed once. They aren't anymore, and
+`data/__tests__/roster-placeholder.test.js` fails the suite if real-looking data
+reappears in that file.
+
+<Warning>
+  After running the fetch script locally, `data/roster.json` holds real staff
+  data. Revert it before committing: `git checkout data/roster.json`.
+</Warning>
+
+## Why build-time, not runtime
+
+<AccordionGroup>
+  <Accordion title="Hardcoded config file">
+    A code deploy for every roster change, and personal emails plus Asana GIDs
+    sitting in the repo.
+  </Accordion>
+  <Accordion title="Environment variables">
+    Wrong shape for structured reference data — six people × three fields is 18
+    variables.
+  </Accordion>
+  <Accordion title="Runtime Notion fetch">
+    Adds API latency and a Notion outage dependency to every single form load,
+    for data that changes about twice a year.
+  </Accordion>
+  <Accordion title="Netlify Blobs / Postgres">
+    A runtime dependency and an operational surface for a six-row list.
+  </Accordion>
+</AccordionGroup>
+
+Build-time fetch with a committed fallback wins on all three axes that matter
+here: zero runtime latency, no third-party outage in the hot path, and no
+personal data in the repo. The cost is that roster changes need a rebuild — see
+[Roster management](/operations/roster-management) for the Notion automation that
+triggers one.

@@ -1,0 +1,265 @@
+---
+title: "Netlify Functions"
+description: "The endpoints, their contracts, and their status codes."
+icon: "server"
+---
+
+All live in `netlify/functions/`. Shared helpers sit in `_shared/`. The
+underscore keeps Netlify from deploying them as endpoints.
+
+There are two groups:
+
+- **Request flow:** `chat`, `create-task`, `attach-task`. These require a
+  session and return **401** without one. They reject non-`POST` with 405, a
+  non-JSON `Content-Type` with 415 (the CSRF guard), and malformed JSON with
+  400.
+- **Accounts:** `session`, `login`, `register`, `verify-email`,
+  `create-invite`, `logout`. Every one except `session` (a `GET`) is a `POST`
+  with the same 405/415/400 checks. Auth **fails closed** without Redis:
+  `login`, `register`, and `verify-email` return 503, `session` reports
+  signed out, and anything behind `requireSession` returns 401.
+
+Every session check (`requireSession` / `getSession`) slides the 30-minute
+session TTL. See [Authentication](/architecture/authentication).
+
+## session
+
+`GET`. Tells the client who is signed in. The `HttpOnly` cookie is invisible to
+JS. It counts as activity.
+
+```json Response 200
+{ "authenticated": true, "email": "you@example.com", "canInvite": false }
+```
+
+Signed out (or Redis down): `{ "authenticated": false }`, still 200.
+
+## login
+
+One endpoint with three modes, chosen by which field is in the body:
+
+<CodeGroup>
+```json Request a magic link
+{ "email": "you@example.com" }
+```
+
+```json Redeem a magic link
+{ "loginToken": "<43-char token from /login?token=>" }
+```
+
+```json Google
+{ "googleCredential": "<Google ID token>" }
+```
+</CodeGroup>
+
+| Mode | Success | Errors |
+|---|---|---|
+| `email` | 200 `{ sent: true }`, **always**, account or not, padded to a 1 s minimum. The link is emailed only if `canSignIn` passes | 422 invalid email · 429 over 5 / 10 min |
+| `loginToken` | 200 `{ authenticated, email, canInvite }` + `Set-Cookie` | 410 expired/used/malformed · 429 over 10 / min |
+| `googleCredential` | 200 same as above + `Set-Cookie` | 401 unverifiable token · 403 no active account · 429 over 10 / min |
+
+`canSignIn(email)` passes for `active` accounts. An `INVITER_EMAILS` address
+with **no record at all** is provisioned `active` on the spot. A record with
+any other status (`pending`, `disabled`) fails, even for an inviter. If
+the email fails to send, the error is logged and the response is still
+`{ sent: true }`.
+
+## register
+
+<CodeGroup>
+```json Email
+{ "inviteToken": "...", "email": "new@example.com" }
+```
+
+```json Google
+{ "inviteToken": "...", "googleCredential": "<Google ID token>" }
+```
+</CodeGroup>
+
+```json Response 200
+{ "pending": true, "email": "new@example.com", "emailSent": true }
+```
+
+| Code | When |
+|---|---|
+| 200 | Invite consumed, user saved as `pending` with a 24 h TTL, confirmation emailed (`emailSent: false` if Resend failed) |
+| 401 | Google credential couldn't be verified |
+| 409 | That email already has an `active` account |
+| 410 | Invite token malformed, expired, or already used |
+| 422 | Invalid email (must be a bare address), or email/Google email doesn't match the invite (**invite not consumed**) |
+| 429 | Over 10 requests/min from this IP |
+
+The email match is checked before `GETDEL`, so a typo doesn't use up the
+invite. `GETDEL` makes consumption atomic: when two submits race, only one
+succeeds.
+
+## verify-email
+
+<CodeGroup>
+```json Confirm
+{ "token": "<from /verify?token=>" }
+```
+
+```json Resend
+{ "resend": "new@example.com" }
+```
+</CodeGroup>
+
+| Mode | Success | Errors |
+|---|---|---|
+| `token` | 200 `{ authenticated, email, canInvite }` + `Set-Cookie`. A `pending` account becomes `active` (with `verifiedAt`, and the TTL removed). An already-active account just gets a session | 410 expired/used, account gone, or any other status such as `disabled` · 429 over 10 / min |
+| `resend` | 200 `{ ok: true }` **always**, padded to a 1 s minimum. A new link is sent only if the account is `pending` | 429 over 3 / 10 min |
+
+## create-invite
+
+Requires a session **and** an inviter email.
+
+```json Request
+{ "email": "new@example.com", "sendEmail": true }
+```
+
+```json Response 200
+{ "link": "https://…/invite?token=…", "expiresAt": 1754000000000, "emailSent": true }
+```
+
+| Code | When |
+|---|---|
+| 200 | Invite stored for 48 h. `emailSent` is false if `sendEmail: false` or Resend failed. The link is returned either way |
+| 401 | No live session |
+| 403 | Signed in, but not in `INVITER_EMAILS` |
+| 409 | That email already has an `active` account |
+| 422 | Invalid email |
+| 429 | Over 20 invites/hour from this IP |
+
+Inviting a `pending` user is allowed. Use it to re-invite someone whose
+confirmation lapsed.
+
+## logout
+
+`POST {}`. Deletes `sess:<hash>` and returns a `Set-Cookie` with `Max-Age=0`.
+Returns 200 `{ ok: true }`.
+
+## chat
+
+Proxies the conversation to the Anthropic API as Philip.
+
+```json Request
+{
+  "formData": { "title": "...", "details": "...", "dueDate": "...", "submitterName": "..." },
+  "messages": [{ "role": "user", "content": "..." }]
+}
+```
+
+Response is the validated tool input, one of:
+
+```json
+{ "status": "needs_clarification", "question": "..." }
+{ "status": "clear" }
+{ "status": "summarized", "summary": { "what": "...", "context": "...", "scope": "...", "constraints": "...", "definition_of_done": "..." } }
+```
+
+| Code | When |
+|---|---|
+| 200 | Valid tool response |
+| 400 | `formData` missing or `messages` not an array |
+| 401 | No live session |
+| 415 | `Content-Type` isn't `application/json` |
+| 429 | Over 20 requests/min from this IP |
+| 502 | Anthropic error, unparseable response, or `summarized` with an incomplete summary |
+| 504 | Anthropic exceeded the 9-second timeout |
+
+### Structured output via forced tool use
+
+The model is called with `tool_choice: { type: "tool", name: "respond" }` and a
+schema requiring `status`. The handler reads `content[].tool_use.input` — it
+never parses JSON out of prose.
+
+<Note>
+  The schema only requires `status`, so a `summarized` response can legally omit
+  `summary`. The handler re-validates all five summary fields as non-empty
+  strings and returns 502 if any is missing, so the client never reaches a blank
+  summary panel.
+</Note>
+
+### Prompt-injection containment
+
+User-controlled text is **not** interpolated into the system prompt. It goes
+into a `<form_submission>`-delimited user message, length-capped per field
+(title 200, details 4000, due date 40, name 100), and the system prompt
+instructs the model to treat that block as data. There's a test for exactly
+this.
+
+## create-task
+
+```json Request
+{
+  "title": "...", "details": "...", "dueDate": "2026-08-01",
+  "submitterName": "...",
+  "followerGid": "...", "assigneeGid": null,
+  "summary": { "what": "...", "...": "..." }
+}
+```
+
+| Code | When |
+|---|---|
+| 200 | Task created — returns the Asana payload with `name` and `permalink_url` |
+| 401 | No live session |
+| 415 | `Content-Type` isn't `application/json` |
+| 422 | Missing required fields, or a `followerGid`/`assigneeGid` not in the roster |
+| 502 | Asana unreachable |
+| 504 | Asana exceeded the 8-second timeout |
+| *pass-through* | Asana's own status on an API error |
+
+Three validations worth noting:
+
+**Attribution from the session.** The "Submitted by" line uses the session's
+email. Any `submitterEmail` in the body is ignored, so a caller can't file a task
+under someone else's address.
+
+**Summary-or-details.** The task body is built from the five-field summary when
+it's complete, otherwise from raw `details`. An empty `{}` summary is rejected
+rather than producing literal `"undefined"` in the notes.
+
+**GID allowlist.** `followerGid` and `assigneeGid` are checked against
+`isValidGid()`, which is built from `data/roster.json`. Without it, a direct POST
+could add any workspace user as a follower and spam them with notifications.
+
+## attach-task
+
+```json Request
+{ "taskGid": "...", "fileName": "quote.pdf", "mimeType": "application/pdf", "fileData": "<base64>" }
+```
+
+| Code | When |
+|---|---|
+| 200 | Attachment created |
+| 400 | Missing `taskGid`, `fileName`, or `fileData` |
+| 401 | No live session |
+| 403 | Task not found, or task not in the allowed project |
+| 413 | Decoded size over 1 MB |
+| 415 | Request `Content-Type` isn't `application/json`, or file MIME type not in the allowlist |
+| 502 / 504 | Asana unreachable / timed out |
+
+**Project preflight.** The Asana PAT is workspace-scoped, so before attaching,
+the handler `GET`s the task and confirms `ASANA_PROJECT_GID` is among its
+projects. Otherwise a signed-in caller could attach files to any
+task in the workspace.
+
+**Size is checked twice.** The client caps at 700 KB; the server caps the decoded
+payload at 1 MB. The server figures decoded size arithmetically from the base64
+length rather than allocating the buffer first.
+
+## Shared helpers
+
+| File | Exports |
+|---|---|
+| `_shared/redis.js` | `getRedis()`: the shared Upstash client, or `null` when `UPSTASH_*` is unset |
+| `_shared/tokens.js` | `newToken()` (32 random bytes, base64url), `hashToken()` (SHA-256), `isTokenShape()` |
+| `_shared/session.js` | `createSession`, `getSession`, `requireSession` (401 guard), `destroySession`. Owns the `ogc_session` cookie |
+| `_shared/users.js` | `normalizeEmail`, `isValidEmail`, `isInviter`, `getUser`, `saveUser`, `canSignIn` |
+| `_shared/verification.js` | `sendConfirmation()`: issues a `verify:` token and emails it |
+| `_shared/email.js` | `sendEmail()` via the Resend REST API (10 s timeout), plus invite/confirm/login templates |
+| `_shared/google.js` | `verifyGoogleIdToken()`: checks the ID token against Google's JWKS with `jose` |
+| `_shared/http.js` | `json()`, `requireJsonContentType()` (415), `parseJsonPost()` (405/415/400), `appUrl()` (`APP_URL` → `URL` → localhost) |
+| `_shared/timing.js` | `padTo()` / `RESPONSE_FLOOR_MS`: minimum response time for enumeration-sensitive responses (`AUTH_RESPONSE_FLOOR_MS`, default 1000) |
+| `_shared/rate-limit.js` | Per-IP `limit()`. Fails open. See [Rate limiting](/operations/rate-limiting) |
+| `_shared/roster.js` | `isValidGid()`: the roster-derived GID allowlist |

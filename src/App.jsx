@@ -1,10 +1,13 @@
-import { useReducer, useRef, useState } from 'react'
-import PassphraseGate from './components/PassphraseGate.jsx'
+import { useEffect, useReducer, useRef, useState } from 'react'
+import SignIn from './components/SignIn.jsx'
+import Register from './components/Register.jsx'
+import ConfirmToken from './components/ConfirmToken.jsx'
+import InvitePanel from './components/InvitePanel.jsx'
 import IntakeForm from './components/IntakeForm.jsx'
 import PhilipChat from './components/PhilipChat.jsx'
 import SuccessMessage from './components/SuccessMessage.jsx'
 import { createTask, attachFile } from './lib/asana.js'
-import { getAuthToken, isAuthValid } from './lib/auth.js'
+import { getSession, logout, parseAuthRoute } from './lib/auth.js'
 
 const STAGE = {
   FORM: 'FORM',
@@ -14,6 +17,8 @@ const STAGE = {
   SUCCESS: 'SUCCESS',
   ERROR: 'ERROR',
 }
+
+const SESSION_EXPIRED = 'Your session expired after 30 minutes of inactivity. Sign in again, then resubmit — your request is still here.'
 
 const MAX_Q = 3
 const MAX_CLEAR_DEPTH = 2
@@ -90,7 +95,11 @@ function reducer(state, action) {
 }
 
 export default function App() {
-  const [authenticated, setAuthenticated] = useState(isAuthValid)
+  // undefined = still checking, null = signed out, else { email, canInvite }
+  const [session, setSession] = useState(undefined)
+  const [route, setRoute] = useState(parseAuthRoute) // { kind: invite|verify|login, token } | null
+  const [notice, setNotice] = useState(null)
+  const [showInvite, setShowInvite] = useState(false)
   const [state, dispatch] = useReducer(reducer, INITIAL)
   const {
     stage, formData, messages, askedCount, awaitingAI, summary,
@@ -105,6 +114,64 @@ export default function App() {
   const philipInFlight = useRef(false)
   const confirmInFlight = useRef(false)
 
+  // Strip one-time tokens from the address bar and history as soon as we've read them.
+  useEffect(() => {
+    if (route) window.history.replaceState(null, '', '/')
+  }, [])
+
+  useEffect(() => {
+    getSession()
+      .then((s) => setSession(s.authenticated ? s : null))
+      .catch(() => setSession(null))
+  }, [])
+
+  // Magic links open in a new tab. When a signed-out tab regains focus,
+  // re-check the shared cookie so this tab — and its unsent request — resumes.
+  useEffect(() => {
+    if (session !== null || route) return
+    const recheck = () => {
+      if (document.visibilityState === 'hidden') return
+      getSession()
+        .then((s) => {
+          if (s.authenticated) {
+            setSession(s)
+            setNotice(null)
+          }
+        })
+        .catch(() => {})
+    }
+    window.addEventListener('focus', recheck)
+    document.addEventListener('visibilitychange', recheck)
+    return () => {
+      window.removeEventListener('focus', recheck)
+      document.removeEventListener('visibilitychange', recheck)
+    }
+  }, [session, route])
+
+  // A protected call returned 401: drop to the sign-in screen. App stays
+  // mounted, so the reducer (the in-progress request) survives re-login.
+  const expireSession = () => {
+    setSession(null)
+    setShowInvite(false)
+    setNotice(SESSION_EXPIRED)
+  }
+
+  const handleSignedIn = (s) => {
+    setSession(s)
+    setRoute(null)
+    setNotice(null)
+  }
+
+  const handleSignOut = async () => {
+    await logout().catch(() => {})
+    setSession(null)
+    setShowInvite(false)
+    setNotice(null)
+    formDataRef.current = null
+    askedCountRef.current = 0
+    dispatch({ type: 'RESET' })
+  }
+
   // Recursive worker. Callers hold philipInFlight, so it does not re-guard.
   const runPhilip = async (apiMessages, depth = 0) => {
     dispatch({ type: 'AI_START' })
@@ -117,11 +184,16 @@ export default function App() {
         body: JSON.stringify({
           formData: formDataRef.current,
           messages: apiMessages,
-          passphraseToken: getAuthToken(),
         }),
       })
     } catch {
       dispatch({ type: 'ERROR', message: "We couldn't reach the assistant." })
+      return
+    }
+
+    if (res.status === 401) {
+      dispatch({ type: 'ERROR', message: SESSION_EXPIRED })
+      expireSession()
       return
     }
 
@@ -200,7 +272,8 @@ export default function App() {
     try {
       data = await createTask({ ...formData, summary })
     } catch (err) {
-      dispatch({ type: 'ERROR', message: err.message })
+      dispatch({ type: 'ERROR', message: err.status === 401 ? SESSION_EXPIRED : err.message })
+      if (err.status === 401) expireSession()
       confirmInFlight.current = false
       return
     }
@@ -236,9 +309,30 @@ export default function App() {
     dispatch({ type: 'RESET' })
   }
 
-  if (!authenticated) {
-    return <PassphraseGate onAuthenticated={() => setAuthenticated(true)} />
+  if (route?.kind === 'invite') {
+    return <Register inviteToken={route.token} onCancel={() => setRoute(null)} />
   }
+  if (route) {
+    return <ConfirmToken kind={route.kind} token={route.token} onSignedIn={handleSignedIn} onCancel={() => setRoute(null)} />
+  }
+  if (session === undefined) {
+    return <div className="min-h-screen bg-gray-50" aria-busy="true" />
+  }
+  if (!session) {
+    return <SignIn onSignedIn={handleSignedIn} notice={notice} />
+  }
+
+  const header = (
+    <div className="w-full max-w-lg flex items-center justify-end gap-4 text-sm text-gray-500 mb-4">
+      <span className="truncate">{session.email}</span>
+      {session.canInvite && (
+        <button type="button" onClick={() => setShowInvite((v) => !v)} className="text-blue-600 hover:underline">
+          Invite
+        </button>
+      )}
+      <button type="button" onClick={handleSignOut} className="hover:underline">Sign out</button>
+    </div>
+  )
 
   if (stage === STAGE.SUCCESS) {
     return (
@@ -258,13 +352,16 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center py-10 px-4">
+      {header}
       <div className="w-full max-w-lg">
+        {showInvite && <InvitePanel onClose={() => setShowInvite(false)} onSessionExpired={expireSession} />}
         <div className="text-center mb-8">
           <h1 className="text-2xl font-semibold text-gray-900">Oneida Gospel Church</h1>
           <p className="text-gray-500 mt-1">Submit a request to the Deacon board</p>
         </div>
         <IntakeForm
           initialData={formData}
+          accountEmail={session.email}
           onSubmit={handleFormSubmit}
           onFileChange={(file) => dispatch({ type: 'SET_FILE', file })}
           frozen={frozen}

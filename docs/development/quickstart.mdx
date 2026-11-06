@@ -1,0 +1,124 @@
+---
+title: "Quickstart"
+description: "Clone, configure, and run the app locally."
+icon: "rocket"
+---
+
+## Requirements
+
+- Node.js 20.17+ (Netlify CLI and the Mintlify CLI both want it)
+- An Asana Personal Access Token with access to the OGC Deacons project
+- An Anthropic API key
+- An [Upstash](https://console.upstash.com) Redis database (the free tier is
+  fine; use a separate dev database). Sign-in doesn't work without it
+- A [Resend](https://resend.com) API key, if you want emails to actually send
+
+## Setup
+
+```bash
+git clone <repo-url>
+cd ogc-asana-intake-form
+npm install
+cp .env.example .env
+# fill in .env — see Environment variables
+netlify dev
+```
+
+`netlify dev` serves Vite **and** the Netlify Functions together at
+`http://localhost:8888`. This is the mode you want for anything that touches
+Philip, task creation, or sign-in.
+
+## First sign-in
+
+Nobody has an account in a fresh Redis database. Inviters bootstrap the system:
+
+<Steps>
+  <Step title="Make yourself an inviter">
+    Put your own email in `INVITER_EMAILS` in `.env`, then restart
+    `netlify dev`.
+  </Step>
+  <Step title="Request a magic link">
+    Open `http://localhost:8888`, enter that email, and press **Email me a
+    sign-in link**. Your account is created `active` on the spot.
+  </Step>
+  <Step title="Open the link">
+    With `RESEND_API_KEY` and a verified `EMAIL_FROM` set, the link lands in
+    your inbox and points at `http://localhost:8888/login?token=…`. Press
+    **Sign in**.
+  </Step>
+  <Step title="Invite a test account">
+    Use the **Invite** button in the header and clear **Email the invite to
+    them for me** to get a copyable link. Open it in a private window to try
+    the registration flow.
+  </Step>
+</Steps>
+
+<Tip>
+  No Resend key? Invites still work with the copy-link option, but magic links
+  and confirmation emails can't be delivered. The send failure is logged as
+  `[login] email failed` or `[verification] confirmation email failed`. If
+  Google is configured, an inviter can bootstrap with **Sign in with Google**
+  instead. Otherwise you need Resend with a verified domain to sign in at all.
+</Tip>
+
+<Warning>
+  `npm run dev` starts the frontend only, on port 5173. The functions aren't
+  running, so sign-in, Philip, and task creation all fail. Use it
+  only for pure UI work.
+</Warning>
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `netlify dev` | Full stack — Vite + Functions on :8888 |
+| `npm run dev` | Frontend only on :5173 |
+| `npm run build` | Production build to `dist/` |
+| `npm test` | Run the Vitest suite once |
+| `npm run test:watch` | Vitest in watch mode |
+| `npm run refresh-roster` | Regenerate `data/roster.json` from Notion |
+
+Run a single test file:
+
+```bash
+npx vitest run src/__tests__/IntakeForm.test.jsx
+```
+
+## Working without every secret
+
+The app degrades in predictable ways, which is useful locally:
+
+<CardGroup cols={2}>
+  <Card title="No UPSTASH_* vars" icon="lock">
+    Nobody can sign in. Auth fails closed, and every function treats you as
+    signed out. Rate limiting is skipped (fails open). These two are mandatory,
+    even locally.
+  </Card>
+  <Card title="No NOTION_* vars" icon="database">
+    `fetch-roster.mjs` exits 0 and the committed placeholder
+    `data/roster.json` is used.
+  </Card>
+  <Card title="No RESEND_API_KEY / EMAIL_FROM" icon="envelope">
+    Emails fail, and the failure is logged. Copy-link invites still work, but
+    magic links and confirmations never arrive.
+  </Card>
+  <Card title="No GOOGLE_CLIENT_ID / VITE_GOOGLE_CLIENT_ID" icon="google">
+    The Google button is hidden. Sign-in is email-only.
+  </Card>
+  <Card title="No ANTHROPIC_API_KEY" icon="robot">
+    Form submits, then Philip errors out. The form stays editable.
+  </Card>
+</CardGroup>
+
+## Docs site
+
+These docs live in `docs/` and are built with [Mintlify](https://mintlify.com).
+
+```bash
+npm i -g mint     # or: npx mint@latest dev
+cd docs
+mint dev          # preview at http://localhost:3000
+```
+
+Config is `docs/docs.json`. Pages are `.mdx`; adding one means adding its path
+to `navigation` in `docs.json` too.

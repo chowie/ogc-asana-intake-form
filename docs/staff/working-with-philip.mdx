@@ -1,0 +1,75 @@
+---
+title: "Working with Philip"
+description: "What the AI assistant does, what it doesn't, and how to get a good summary."
+icon: "messages"
+---
+
+Philip is an AI assistant whose only job is making sure the deacons get a request
+they can act on without chasing you down for details.
+
+## What Philip does
+
+- Reads your form submission.
+- Asks **up to three** short, plain-language questions, one at a time.
+- Writes a five-part summary for the deacons.
+
+That's it. Philip does not create the task, email anyone, or make decisions about
+your request. He drafts the summary; **you** approve it.
+
+## What Philip asks about
+
+He's looking for the four things a deacon needs before acting:
+
+1. What is actually needed
+2. Who it's for
+3. What "done" looks like
+4. Timing or constraints
+
+If your **Request Details** already cover those, Philip skips the questions and
+goes straight to the summary.
+
+<Tip>
+  Want fewer questions? Write two or three sentences in Request Details instead
+  of one. "The nursery needs a new changing table before Easter — the current one
+  is wobbly and the strap is broken" answers three of the four on its own.
+</Tip>
+
+## The three-question limit
+
+Philip stops after three questions no matter what and writes the summary with
+whatever he has. He will not loop forever.
+
+The chat panel shows the count as you go, so you always know how many are left.
+
+## Reviewing and editing
+
+The summary panel appears at the end of the chat with **Confirm** and **Edit**.
+
+- **Confirm** creates the Asana task. This is the only step that sends anything.
+- **Edit** returns you to the form with your original answers intact. When you
+  resubmit, Philip's question count resets and he starts over from your revised
+  request.
+
+<Note>
+  Philip's summary is what the deacons read — it becomes the body of the Asana
+  task, followed by your name and email. Your original free-text details are
+  folded into it rather than pasted in verbatim, so read the summary before
+  confirming.
+</Note>
+
+## Under the hood
+
+<AccordionGroup>
+  <Accordion title="Which model, and where does it run?">
+    Claude Haiku 4.5, called server-side from the `chat` Netlify Function. The
+    Anthropic API key never touches the browser.
+  </Accordion>
+  <Accordion title="Is my request used to train an AI?">
+    No. Requests go to the Anthropic API for the length of the conversation only.
+  </Accordion>
+  <Accordion title="What if Philip doesn't respond?">
+    The request times out after about nine seconds and you get an error message
+    with the form still editable. Try again — see the
+    [FAQ](/staff/faq).
+  </Accordion>
+</AccordionGroup>

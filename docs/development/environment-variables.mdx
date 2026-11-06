@@ -1,0 +1,179 @@
+---
+title: "Environment variables"
+description: "Every variable, what reads it, and what breaks without it."
+icon: "key"
+---
+
+Copy `.env.example` to `.env` and fill it in. `netlify dev` reads `.env`
+automatically.
+
+<Warning>
+  Only one variable has a `VITE_` prefix: `VITE_GOOGLE_CLIENT_ID`. A `VITE_`
+  prefix puts the value in the client JS bundle, which makes it public. That
+  is acceptable only because OAuth client IDs are public by design. Every
+  other variable is a secret, read only inside Netlify Functions or at build
+  time. Never add `VITE_` to any of them.
+</Warning>
+
+## Required
+
+<ResponseField name="UPSTASH_REDIS_REST_URL" type="string" required>
+  Upstash Redis REST URL. Redis stores accounts, invites, one-time links, and
+  sessions, and it backs rate limiting. Without it, sign-in **fails closed**:
+  nobody can get in.
+</ResponseField>
+
+<ResponseField name="UPSTASH_REDIS_REST_TOKEN" type="string" required>
+  Upstash Redis REST token. Both Upstash variables must be set. Use a separate
+  database for local development.
+</ResponseField>
+
+<ResponseField name="INVITER_EMAILS" type="string" required>
+  A comma-separated list of the emails allowed to send invites, for example
+  `a@example.com, b@example.com`. Matching is case-insensitive. These people
+  can sign in with no invite, and their account is created the first time they
+  sign in. With this unset, nobody can invite and the system can't bootstrap.
+</ResponseField>
+
+<ResponseField name="RESEND_API_KEY" type="string" required>
+  [Resend](https://resend.com) API key. Used to send invite, confirmation, and
+  sign-in emails.
+</ResponseField>
+
+<ResponseField name="EMAIL_FROM" type="string" required>
+  The sender for those emails, for example `OGC Deacons <noreply@your-domain>`.
+  The domain must be verified in Resend, with its SPF and DKIM DNS records in
+  place, or Resend rejects the send.
+</ResponseField>
+
+<ResponseField name="ASANA_PAT" type="string" required>
+  Asana Personal Access Token. It is workspace-scoped, which is why
+  `attach-task` checks first that the target task is actually in the OGC
+  Deacons project.
+</ResponseField>
+
+<ResponseField name="ASANA_PROJECT_GID" type="string" required>
+  GID of the OGC Deacons project. From the project URL:
+  `app.asana.com/0/<PROJECT_GID>/...`
+</ResponseField>
+
+<ResponseField name="ASANA_INBOX_SECTION_GID" type="string" required>
+  GID of the Inbox section inside that project.
+
+  ```bash
+  curl -H "Authorization: Bearer $ASANA_PAT" \
+    "https://app.asana.com/api/1.0/projects/<PROJECT_GID>/sections"
+  ```
+</ResponseField>
+
+<ResponseField name="ANTHROPIC_API_KEY" type="string" required>
+  Anthropic API key. Used by `chat` for Philip.
+</ResponseField>
+
+## Optional: Google sign-in
+
+<ResponseField name="GOOGLE_CLIENT_ID" type="string">
+  OAuth 2.0 Web client ID. Read on the server to verify Google ID tokens
+  (`aud`, `iss`, `email_verified`). No client secret is needed.
+</ResponseField>
+
+<ResponseField name="VITE_GOOGLE_CLIENT_ID" type="string">
+  The same value, bundled into the client so the Google button can render. If
+  it's unset, the button is hidden and sign-in is email-only. It's read at
+  **build** time, so changing it requires a rebuild.
+</ResponseField>
+
+Set both variables or neither. If only the `VITE_` one is set, the button
+appears but every Google attempt fails with "We couldn't verify your Google
+account."
+
+### Creating the client ID
+
+<Steps>
+  <Step title="OAuth consent screen">
+    In [Google Cloud Console](https://console.cloud.google.com), go to **APIs &
+    Services → OAuth consent screen**. Choose **External**, fill in the app
+    name and support email, and publish it.
+  </Step>
+  <Step title="Create credentials">
+    **Credentials → Create credentials → OAuth client ID**, application type
+    **Web application**.
+  </Step>
+  <Step title="Authorized JavaScript origins">
+    Add the production URL (for example `https://your-site.netlify.app`) and
+    `http://localhost:8888`. You don't need redirect URIs.
+  </Step>
+  <Step title="Copy the client ID">
+    Put it in both `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID`. Ignore the
+    client secret.
+  </Step>
+</Steps>
+
+## Optional: links and timing
+
+<ResponseField name="APP_URL" type="string">
+  Overrides the base URL used for emailed links (`/invite`, `/verify`,
+  `/login`). The order is `APP_URL`, then Netlify's built-in `URL`, then
+  `http://localhost:8888`. Netlify's `URL` always points at **production**, so
+  set `APP_URL` in the **Deploy Previews** context if you want to test emails
+  from a preview.
+</ResponseField>
+
+<ResponseField name="AUTH_RESPONSE_FLOOR_MS" type="number">
+  The minimum response time, in milliseconds, for `login { email }` and
+  `verify-email { resend }`. It keeps the response time the same whether or
+  not an account exists. The default is `1000`. Leave it alone outside of
+  tests.
+</ResponseField>
+
+`URL` is set by Netlify. Don't set it yourself in production. The base URL
+never comes from the request's `Host` header. `URL` also controls the session
+cookie: `Secure` is dropped only when `URL` starts with `http://localhost`.
+
+## Build-time (roster)
+
+<ResponseField name="NOTION_TOKEN" type="string">
+  Notion internal integration token, read-only, shared with the roster database
+  only.
+</ResponseField>
+
+<ResponseField name="NOTION_ROSTER_DB_ID" type="string">
+  ID of the Notion roster database: the 32-character hex string in the
+  database URL before `?v=`.
+</ResponseField>
+
+If either one is unset, `scripts/fetch-roster.mjs` logs a warning and exits 0,
+and the build continues with the committed placeholder roster. See
+[Roster](/architecture/roster).
+
+## Who reads what
+
+| Variable | Read by | Missing → |
+|---|---|---|
+| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | `_shared/redis.js` (auth + rate limiting) | Auth fails closed: signed out, 401 on protected functions, 503 from `login`/`register`/`verify-email`. Rate limiting skipped |
+| `INVITER_EMAILS` | `_shared/users.js` | No one can invite or bootstrap. `create-invite` returns 403 |
+| `RESEND_API_KEY` / `EMAIL_FROM` | `_shared/email.js` | No emails. Invites can still be copied as links. `emailSent: false` |
+| `GOOGLE_CLIENT_ID` | `_shared/google.js` | Every Google credential rejected (401) |
+| `VITE_GOOGLE_CLIENT_ID` | `GoogleButton.jsx` (build) | Google button hidden |
+| `APP_URL` | `_shared/http.js` | Falls back to `URL`, then localhost |
+| `AUTH_RESPONSE_FLOOR_MS` | `_shared/timing.js` | Defaults to 1000 ms |
+| `ASANA_PAT` | `create-task`, `attach-task` | Asana 401 surfaced to the client |
+| `ASANA_PROJECT_GID` | `create-task`, `attach-task` | Task creation fails. Attach preflight rejects |
+| `ASANA_INBOX_SECTION_GID` | `create-task` | Asana rejects the membership |
+| `ANTHROPIC_API_KEY` | `chat` | 502 "Claude API returned an error" |
+| `NOTION_TOKEN` | `scripts/fetch-roster.mjs` (build) | Placeholder roster |
+| `NOTION_ROSTER_DB_ID` | `scripts/fetch-roster.mjs` (build) | Placeholder roster |
+
+## Production
+
+Set the same values in **Netlify → Site configuration → Environment variables**.
+Netlify applies environment-variable changes on the **next deploy**, for
+functions and for the build. After you change one, trigger a redeploy. See
+[Deployment](/operations/deployment).
+
+<Warning>
+  Scope `UPSTASH_*`, `RESEND_API_KEY`, and `INVITER_EMAILS` to the
+  **Production** deploy context, or give Deploy Previews and branch deploys
+  their own Upstash database. Otherwise, a preview build of any branch reads
+  and writes the production accounts and sessions.
+</Warning>

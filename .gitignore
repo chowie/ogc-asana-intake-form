@@ -16,5 +16,9 @@ dist/
 # Local Netlify folder
 .netlify
 
+# Mintlify CLI local cache
+.mint/
+docs/.mint/
+
 # Internal dev notes — not for public consumption
 tasks/

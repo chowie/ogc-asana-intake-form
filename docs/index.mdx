@@ -1,0 +1,52 @@
+---
+title: "OGC Deacon Request Form"
+description: "Submit a request to the Deacon board — and the docs for the app behind it."
+icon: "house"
+---
+
+Oneida Gospel Church staff use this form to send requests to the Deacon board.
+You fill out a short form, answer a couple of clarifying questions from **Philip**
+(an AI assistant), review the summary, and confirm. The request lands in the
+Asana **OGC Deacons** project as a task in the **Inbox** section.
+
+## Pick your path
+
+<CardGroup cols={3}>
+  <Card title="I need to submit a request" icon="clipboard-list" href="/staff/submitting-a-request">
+    Step-by-step walkthrough of the form, Philip, and the confirmation screen.
+  </Card>
+  <Card title="I work on the code" icon="code" href="/development/quickstart">
+    Local setup, environment variables, architecture, and tests.
+  </Card>
+  <Card title="I run this thing" icon="wrench" href="/operations/deployment">
+    Deploys, inviting users, roster updates, secret rotation, and troubleshooting.
+  </Card>
+</CardGroup>
+
+## What happens to a request
+
+<Steps>
+  <Step title="Sign in">
+    Staff sign in with their own invited account, using an emailed link or
+    Google. Sessions end after 30 minutes of inactivity.
+  </Step>
+  <Step title="Form">
+    Name, request title, details, plus optional due date, assignee, and file.
+  </Step>
+  <Step title="Philip">
+    Up to three plain-language clarifying questions, then a five-part summary.
+  </Step>
+  <Step title="Confirm">
+    Nothing is sent to Asana until the summary is confirmed.
+  </Step>
+  <Step title="Asana">
+    A task is created in the OGC Deacons project, Inbox section, with the
+    submitter as a follower.
+  </Step>
+</Steps>
+
+<Note>
+  No credentials ever reach the browser. Every secret (the Asana token, the
+  Anthropic key, the email and Redis credentials) lives server-side in Netlify
+  Functions. The session is an `HttpOnly` cookie that page scripts can't read.
+</Note>

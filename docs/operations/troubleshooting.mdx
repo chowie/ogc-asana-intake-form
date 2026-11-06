@@ -1,0 +1,333 @@
+---
+title: "Troubleshooting"
+description: "Symptom → cause → fix, for the person on the hook."
+icon: "screwdriver-wrench"
+---
+
+Function logs are the first stop for everything below: **Netlify → Logs →
+Functions**, filtered by function name.
+
+## Nobody can sign in
+
+<AccordionGroup>
+  <Accordion title="Every function treats everyone as signed out / login returns 503">
+    Redis is missing or unreachable, and auth fails closed. Check that both
+    `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set, then
+    **redeploy**. Env changes don't reach functions until the next deploy.
+    Look for `[session] lookup failed` or `[login] …` in the function logs,
+    and check [status.upstash.com](https://status.upstash.com).
+  </Accordion>
+  <Accordion title="An inviter requests a magic link and nothing arrives">
+    First check that their address is in `INVITER_EMAILS` **in the deployed
+    build**: if you edited the variable, did you redeploy? The response is
+    always "If this email has an account…", so the screen tells you nothing.
+    Then follow [Emails aren't arriving](#emails-arent-arriving).
+  </Accordion>
+  <Accordion title="'Too many requests' on the sign-in screen">
+    `login-request` allows 5 per 10 minutes per IP, and an office behind one IP
+    shares that bucket. Wait 10 minutes. See
+    [Rate limiting](/operations/rate-limiting).
+  </Accordion>
+  <Accordion title="Everyone is suddenly signed out">
+    Someone deleted the `sess:*` keys, or the deploy points at a different
+    Upstash database. If it's a new database, **every account is gone**:
+    inviters bootstrap again, and everyone else needs a fresh invite. Sessions
+    also end when the browser closes. That's expected.
+  </Accordion>
+</AccordionGroup>
+
+## Emails aren't arriving
+
+Invite, confirmation, and sign-in emails all go through Resend. Find the
+failure in this order:
+
+<Steps>
+  <Step title="Function log">
+    `[login] email failed`, `[create-invite] email failed`, or
+    `[verification] confirmation email failed` means the send itself failed.
+    The message includes Resend's status. `Email is not configured` means
+    `RESEND_API_KEY` or `EMAIL_FROM` is unset.
+  </Step>
+  <Step title="Resend dashboard → Emails">
+    If the email is listed as **Delivered**, the problem is on the recipient's
+    side (spam or quarantine). If it's **Bounced**, check the address. If it
+    isn't listed at all, Resend never received the request: go back to the
+    function log.
+  </Step>
+  <Step title="Resend → Domains">
+    A 403 or "domain not verified" error means the `EMAIL_FROM` domain isn't
+    verified, or its SPF/DKIM DNS records were changed or removed. Fix the DNS
+    and wait for **Verified**.
+  </Step>
+  <Step title="Spam folder">
+    Ask the recipient to check spam, junk, and promotions, and to look for
+    quarantine in church-managed Microsoft 365. Adding the sender to contacts
+    helps future emails arrive.
+  </Step>
+</Steps>
+
+<Tip>
+  An invite can always be delivered by hand. The inviter clears **Email the
+  invite to them for me** and sends the copied link by text or chat. There's
+  no copy-link fallback for confirmation and sign-in emails, so for those,
+  Resend has to work.
+</Tip>
+
+<AccordionGroup>
+  <Accordion title="Sign-in link requests feel slow">
+    Expected. `login { email }` and the resend endpoint always take at least
+    one second (`AUTH_RESPONSE_FLOOR_MS`), so response time doesn't reveal
+    whether an account exists.
+  </Accordion>
+  <Accordion title="Email links from a deploy preview point at production">
+    Expected. Links use Netlify's `URL`, which is always the production URL.
+    To test emails on a preview, set `APP_URL` in the **Deploy Previews**
+    context to the preview's URL and redeploy the preview. Leave `APP_URL`
+    unset in production.
+  </Accordion>
+  <Accordion title="Links point at localhost or the wrong site">
+    `APP_URL` is set where it shouldn't be, or locally `URL` isn't
+    `http://localhost:8888`. Links are never built from the request's `Host`
+    header.
+  </Accordion>
+</AccordionGroup>
+
+## Invites and registration
+
+<AccordionGroup>
+  <Accordion title="'This invite link has expired or has already been used'">
+    Invites last 48 hours and work once. A malformed link (for example,
+    truncated when it was pasted) gives the same 410. The inviter creates a new
+    invite. Inviting someone with a `pending` account is allowed. See
+    [Inviting users](/operations/inviting-users#re-inviting).
+  </Accordion>
+  <Accordion title="'That email does not match the one this invite was sent to'">
+    The person typed a different address than the one the invite was created
+    for. Case doesn't matter, but everything else does. The invite **isn't**
+    used up, so they can correct it and retry. If the inviter mistyped the
+    address, create a new invite with the right one.
+  </Accordion>
+  <Accordion title="'That Google account does not match…'">
+    The Google account's email differs from the invited email. A common case is
+    someone invited at a church address who has a personal Gmail signed in.
+    They can register by typing the invited email instead, or the inviter can
+    re-invite their Google address.
+  </Accordion>
+  <Accordion title="'Please enter a valid email address' for an address that looks fine">
+    Emails have to be a bare address (`name@domain.tld`). Pasting
+    `Jane Doe <jane@example.com>` or a quoted address fails with 422. Remove
+    everything except the address.
+  </Accordion>
+  <Accordion title="'That person already has an account' (409)">
+    Their account is already `active`. They should sign in, not register.
+  </Accordion>
+  <Accordion title="Registered but stuck on 'Confirm your email'">
+    The account is `pending` until the confirmation link is used. The person
+    presses **Resend confirmation email** (3 per 10 minutes). Pending accounts
+    **expire after 24 hours**. After that, or if they closed that screen,
+    re-invite them. The app stays locked for pending accounts, even with
+    Google.
+  </Accordion>
+  <Accordion title="'This confirmation link / sign-in link has expired or was already used'">
+    Sign-in links last 15 minutes and confirmation links 24 hours, and each
+    works once. Pages from emailed links spend the token only when the button
+    is pressed, so a mail scanner shouldn't use it up. If people keep seeing
+    this right away, check whether the link was forwarded or opened twice.
+  </Accordion>
+  <Accordion title="Inviter sees no Invite button">
+    Their email isn't in `INVITER_EMAILS` in the deployed build. Add it,
+    redeploy, and have them reload the page.
+  </Accordion>
+  <Accordion title="An inviter can't sign in even though they're in INVITER_EMAILS">
+    Auto-provisioning only happens when **no** `user:` record exists. If their
+    record is `pending` (they registered through an invite and didn't confirm)
+    or `disabled`, it's respected. Set `status` to `"active"` in the Data
+    Browser, or delete the record so they bootstrap again.
+  </Accordion>
+</AccordionGroup>
+
+## Google sign-in
+
+<AccordionGroup>
+  <Accordion title="Build fails with exit code 2 and a 'secrets scan' report">
+    Netlify's secret scan found an env var's value in the repo or in `dist/`.
+    The Google client ID is meant to be public and bundled, so `netlify.toml`
+    exempts it with `SECRETS_SCAN_OMIT_KEYS`. If the scan flags
+    `VITE_GOOGLE_CLIENT_ID` on lines that only contain the variable **name**,
+    the value stored in Netlify is wrong (for example, the key name pasted
+    into the value field). It should look like
+    `123456789-abc….apps.googleusercontent.com`. Any other flagged key is a
+    real leak: remove the value from the file and rotate it.
+  </Accordion>
+  <Accordion title="No Google button">
+    `VITE_GOOGLE_CLIENT_ID` was unset **at build time**. Set it and use **Clear
+    cache and deploy site**. Also check that `accounts.google.com` isn't
+    blocked by a browser extension.
+  </Accordion>
+  <Accordion title="Button shows, but sign-in says 'We couldn't verify your Google account'">
+    The server rejected the ID token. Usually `GOOGLE_CLIENT_ID` is unset or
+    different from `VITE_GOOGLE_CLIENT_ID` (the audience check fails), or the
+    Google account's email isn't verified.
+  </Accordion>
+  <Accordion title="Google popup errors with 'origin not allowed' / redirect_uri_mismatch">
+    The site's origin isn't in the OAuth client's **Authorized JavaScript
+    origins**. Add the exact production URL (and `http://localhost:8888` for
+    local work). Deploy-preview URLs each need their own entry.
+  </Accordion>
+  <Accordion title="'No active account uses that Google email'">
+    Google sign-in only works for an account that is `active`, or for an
+    inviter with no record yet.
+    The person hasn't registered, hasn't confirmed their email, or uses a
+    different Google address than the one they registered with.
+  </Accordion>
+</AccordionGroup>
+
+## Sessions
+
+<AccordionGroup>
+  <Accordion title="Staff get bounced to sign-in mid-request">
+    Expected after **30 minutes without a request**. The session TTL slides
+    with each request. They see a notice, their request stays in the form, and
+    they resubmit after signing in. If the magic link opens a new tab, the
+    original tab picks up the session on focus. Sessions also end when the
+    browser closes.
+  </Accordion>
+  <Accordion title="A protected function returns 401">
+    No live session: expired, signed out, the user was disabled or deleted, or Redis is
+    down. Protected functions return 401 now (they used to return 403).
+  </Accordion>
+  <Accordion title="Revoking someone right away">
+    In the Upstash Data Browser, set their `user:<email>` record's `status` to
+    `"disabled"`. Every request checks it, so the next one returns 401.
+    Deleting the record works for regular members, but an inviter with no
+    record is re-provisioned on next sign-in. See
+    [Inviting users](/operations/inviting-users#revoking-access).
+  </Accordion>
+  <Accordion title="A revoked person's confirmation link says it expired">
+    Expected. `verify-email` only activates `pending` accounts. Any other
+    non-active status, such as `disabled`, returns 410.
+  </Accordion>
+  <Accordion title="Sign-in works on production but not on `netlify dev`">
+    The session cookie is marked `Secure` unless `URL` starts with
+    `http://localhost`, and some browsers (Safari in particular) drop `Secure`
+    cookies over plain http. Use `netlify dev` at `http://localhost:8888`, and
+    if `URL` isn't being set, add `URL=http://localhost:8888` to `.env`.
+    `npm run dev` doesn't run the functions at all.
+  </Accordion>
+</AccordionGroup>
+
+## The staff dropdown shows "Example Staff 1"
+
+The build ran with the placeholder roster. Check the build log for
+`[fetch-roster]`:
+
+| Log | Fix |
+|---|---|
+| `NOTION_TOKEN or NOTION_ROSTER_DB_ID not set` | Set both in Netlify, rebuild |
+| `Notion API responded 401` | Re-share the database with the integration |
+| `Notion API responded 404` | Wrong database ID |
+| No `[fetch-roster]` line at all | The build command was overridden in the dashboard — it should match `netlify.toml` |
+
+Full detail: [Roster management](/operations/roster-management).
+
+## Philip fails
+
+<AccordionGroup>
+  <Accordion title="502 'Claude API returned an error'">
+    Usually an invalid or over-quota `ANTHROPIC_API_KEY`. Check the Anthropic
+    Console for billing or rate-limit status.
+  </Accordion>
+  <Accordion title="504 'The assistant took too long to respond'">
+    The 9-second timeout fired. Transient — retrying normally works. Persistent
+    504s mean an Anthropic incident.
+  </Accordion>
+  <Accordion title="502 'The assistant returned an incomplete summary'">
+    The model called the tool with `status: summarized` but omitted or blanked a
+    summary field. The handler rejects it rather than showing a blank panel.
+    Retrying usually clears it.
+  </Accordion>
+  <Accordion title="'We couldn't put your summary together'">
+    Client-side: `MAX_CLEAR_DEPTH` was hit — Philip kept returning `clear`
+    instead of producing a summary. Usually a very short request. Ask the
+    submitter to add detail.
+  </Accordion>
+  <Accordion title="401 on chat">
+    The session expired mid-conversation (30 minutes idle) or the user was
+    revoked. The app drops to sign-in and keeps the request. See
+    [Sessions](#sessions).
+  </Accordion>
+</AccordionGroup>
+
+## Task creation fails
+
+<AccordionGroup>
+  <Accordion title="422 'Unknown follower or assignee'">
+    The submitted GID isn't in `data/roster.json`. Most likely the roster changed
+    in Notion but the deployed build still has the old one — rebuild. If it
+    persists, the `Asana GID` value in Notion is wrong.
+  </Accordion>
+  <Accordion title="401 / 403 from Asana">
+    `ASANA_PAT` is invalid, revoked, or belongs to someone who lost access to the
+    project.
+  </Accordion>
+  <Accordion title="400 from Asana about section or project">
+    `ASANA_PROJECT_GID` or `ASANA_INBOX_SECTION_GID` is wrong — most often after
+    the Inbox section was renamed and recreated. Re-fetch:
+
+    ```bash
+    curl -H "Authorization: Bearer $ASANA_PAT" \
+      "https://app.asana.com/api/1.0/projects/<PROJECT_GID>/sections"
+    ```
+  </Accordion>
+  <Accordion title="504 'Asana took too long'">
+    The 8-second timeout fired. **No task was created** — safe to retry.
+  </Accordion>
+</AccordionGroup>
+
+## Attachments fail
+
+| Code | Cause |
+|---|---|
+| 415 | MIME type outside the allowlist. The client's `accept` list and the server's allowlist can drift — check both if a legitimate type is rejected |
+| 413 | Over 1 MB decoded. The client caps at 700 KB, so a 413 means the request didn't come from the form |
+| 403 "Task is not in the allowed project" | `ASANA_PROJECT_GID` doesn't match the project the task landed in |
+| 403 "Task not found or not accessible" | The preflight `GET` failed — usually a PAT permission problem |
+
+Remember: an attachment failure never means the task failed. The task is created
+first.
+
+## Duplicate tasks
+
+The `confirmInFlight` ref guards double-clicks, and `philipInFlight` guards
+double submits. If duplicates appear anyway, the likely cause is a staff member
+resubmitting the whole form after an *attachment* warning. That's a docs problem
+— point them at [Attachments](/staff/attachments).
+
+## Rate limits aren't enforced
+
+Look for `[rate-limit] Upstash not configured` or `limiter error` in the
+function logs. If sign-in works, Redis is configured, so the cause is probably
+a transient limiter error, which fails open. See
+[Rate limiting](/operations/rate-limiting).
+
+## Escalation
+
+<Steps>
+  <Step title="Is it the app or a dependency?">
+    Check [status.anthropic.com](https://status.anthropic.com),
+    [status.asana.com](https://status.asana.com), and
+    [netlifystatus.com](https://www.netlifystatus.com), plus
+    [status.upstash.com](https://status.upstash.com) and
+    [resend-status.com](https://resend-status.com) for sign-in and email
+    problems. Most of the failures above come from upstream services.
+  </Step>
+  <Step title="Roll back">
+    **Deploys → previous successful deploy → Publish deploy.** Instant. Note that
+    it also restores that build's roster.
+  </Step>
+  <Step title="Fall back to email">
+    The form is a convenience over emailing the deacons. If it's down during an
+    event week, say so and take requests by email rather than debugging under
+    pressure.
+  </Step>
+</Steps>
