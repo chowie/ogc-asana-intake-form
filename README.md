@@ -43,7 +43,7 @@ netlify dev   # Vite + Netlify Functions at http://localhost:8888
 | `netlify dev` | Full stack — Vite + Functions on :8888 |
 | `npm run dev` | Frontend only on :5173 |
 | `npm run build` | Production build to `dist/` |
-| `npm test` | Run the test suite once (128 tests) |
+| `npm test` | Run the test suite once (131 tests) |
 | `npm run test:watch` | Vitest in watch mode |
 | `npm run docs` | Preview the docs site |
 | `npm run refresh-roster` | Regenerate `data/roster.json` from Notion |

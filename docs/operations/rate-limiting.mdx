@@ -12,6 +12,12 @@ Upstash Redis does two jobs:
 2. **Rate limiting.** Per-IP limits on the endpoints someone could abuse. This
    is best-effort and fails open.
 
+Upstash saves every write to disk, so a restart loses nothing. The free tier
+has one catch: a database idle for 14 days is archived (backed up, but offline
+until restored). The scheduled `redis-keepalive` function writes once a day to
+keep production active. See
+[Functions](/architecture/functions#redis-keepalive).
+
 ## Limits
 
 | Limiter id | Endpoint | Limit | Why |

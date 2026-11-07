@@ -138,6 +138,15 @@ confirmation lapsed.
 `POST {}`. Deletes `sess:<hash>` and returns a `Set-Cookie` with `Max-Age=0`.
 Returns 200 `{ ok: true }`.
 
+## redis-keepalive
+
+Scheduled, not called by the app. Runs `@daily` (set in `netlify.toml`) and
+writes the current time to `keepalive:last`. Upstash archives free-tier
+databases after 14 days without activity, and since auth fails closed, an
+archived database would lock everyone out. Returns 500 (visible in the function
+logs) if Redis is unset or the write fails. Netlify runs scheduled functions on
+the published production deploy only, so the dev database gets no pings.
+
 ## chat
 
 Proxies the conversation to the Anthropic API as Philip.

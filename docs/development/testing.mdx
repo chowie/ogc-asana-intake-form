@@ -1,6 +1,6 @@
 ---
 title: "Testing"
-description: "Vitest + Testing Library. 128 tests across 10 files."
+description: "Vitest + Testing Library. 131 tests across 11 files."
 icon: "flask"
 ---
 
@@ -26,6 +26,7 @@ file is `src/test/setup.js`.
 | `netlify/functions/_shared/__tests__/timing.test.js` | 2 | `padTo()` waits out the rest of the response floor, and doesn't wait once the floor has passed |
 | `netlify/functions/__tests__/chat.test.js` | 5 | Session guard (401), `needs_clarification` passthrough, 502 on `summarized` with a missing summary, 200 on a complete summary, user fields kept out of the system prompt |
 | `netlify/functions/__tests__/attach-task.test.js` | 5 | Session guard (401), MIME allowlist (415), size cap (413), out-of-project task rejection (403), successful upload |
+| `netlify/functions/__tests__/redis-keepalive.test.js` | 3 | Writes `keepalive:last`, 500 when Redis is unset, 500 when the write fails |
 | `data/__tests__/roster-placeholder.test.js` | 2 | Guards against committing real PII in `data/roster.json` |
 
 ## Patterns used

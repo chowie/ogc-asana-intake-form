@@ -13,6 +13,11 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
+# Daily write so Upstash never archives the free-tier database for
+# inactivity (14 days idle). Runs on production deploys only.
+[functions."redis-keepalive"]
+  schedule = "@daily"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
