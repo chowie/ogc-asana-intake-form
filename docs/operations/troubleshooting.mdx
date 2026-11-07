@@ -17,6 +17,13 @@ Functions**, filtered by function name.
     Look for `[session] lookup failed` or `[login] …` in the function logs,
     and check [status.upstash.com](https://status.upstash.com).
   </Accordion>
+  <Accordion title="Upstash says the database was archived">
+    Free databases are archived after 14 days idle. The daily `redis-keepalive`
+    function exists to prevent this: check its runs under **Logs → Functions**
+    in Netlify. To recover, restore the backup Upstash kept (Upstash console →
+    the archived database → restore), point `UPSTASH_*` at the restored
+    database if its URL or token changed, and **redeploy**.
+  </Accordion>
   <Accordion title="An inviter requests a magic link and nothing arrives">
     First check that their address is in `INVITER_EMAILS` **in the deployed
     build**: if you edited the variable, did you redeploy? The response is

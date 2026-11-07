@@ -73,6 +73,7 @@ links).
 - `verify-email.js` — `{ token }` activates the account and starts a session; `{ resend: email }` re-sends
 - `create-invite.js` — inviter-only; returns `{ link, expiresAt, emailSent }`
 - `logout.js`
+- `redis-keepalive.js` — scheduled `@daily` (in `netlify.toml`); one write so Upstash doesn't archive the free-tier DB after 14 idle days
 - `create-task.js` — proxies task creation to the Asana REST API
 - `chat.js` — proxies conversation to the Anthropic API (Philip persona)
 - `attach-task.js` — uploads optional file attachments to the Asana task
