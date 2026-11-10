@@ -1,4 +1,4 @@
-export default function SuccessMessage({ taskTitle, taskUrl, attachFailed, onReset }) {
+export default function SuccessMessage({ taskTitle, taskUrl, attachFailed, emailSent, onReset }) {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 w-full max-w-sm p-8 text-center">
@@ -29,6 +29,23 @@ export default function SuccessMessage({ taskTitle, taskUrl, attachFailed, onRes
                 Asana task · &ldquo;{taskTitle}&rdquo;
               </span>
             )}
+          </div>
+        )}
+
+        {taskUrl && (
+          <div className="mt-5 rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 text-left text-sm text-gray-700">
+            <p className="font-medium text-gray-900">Want updates on this request?</p>
+            <p className="mt-1">
+              <a href={taskUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                Open the task in Asana
+              </a>{' '}
+              and click <strong>Follow</strong>.
+            </p>
+            <p className="mt-2 text-xs text-gray-500">
+              You&rsquo;ll need a free Asana account. The first time, Asana may ask you to <em>Request access</em> &mdash;
+              a deacon will approve it.
+            </p>
+            {emailSent && <p className="mt-2 text-xs text-gray-500">We&rsquo;ve also emailed you this link.</p>}
           </div>
         )}
 

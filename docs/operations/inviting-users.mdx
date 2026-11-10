@@ -1,6 +1,6 @@
 ---
 title: "Inviting users"
-description: "Inviting staff, re-inviting, revoking access, and managing who can invite."
+description: "Inviting staff, seeing who has an account, re-inviting, revoking access, and managing who can invite."
 icon: "user-plus"
 ---
 
@@ -16,18 +16,22 @@ variable.
     creates an active account.
   </Step>
   <Step title="Open the Invite panel">
-    Click **Invite** in the header, next to your email and **Sign out**.
-    Non-inviters don't see this button.
+    Click **Invite** in the header, next to your name, **Profile**, **Users**,
+    and **Sign out**. Non-inviters don't see this button.
   </Step>
-  <Step title="Enter their email">
-    Type the address they'll register with. It has to match exactly when they
-    register (capital letters don't matter), so if they'll use **Sign up with
-    Google**, enter their Google address.
+  <Step title="Enter their name and email">
+    **First name** and **Last name** are required. They become the person's
+    account name (they can correct the spelling on their first sign-in) and
+    personalize the invite email. Then type the address they'll register with.
+    It has to match exactly when they register (capital letters don't matter),
+    so if they'll use **Sign up with Google**, enter their Google address.
   </Step>
   <Step title="Choose how to deliver it">
     **Email the invite to them for me** is checked by default. With it checked,
-    they get an email saying who invited them, with an **Accept invite**
-    button. Clear the checkbox to skip the email and send the link yourself by
+    they get an email with the subject "*Your name* invited you to the OGC
+    Deacon Board request form". It opens "Hi *first name*,", names you as
+    "*Your name* (*your email*)" so it's clearly from a person, and has an
+    **Accept invite** button. Clear the checkbox to skip the email and send the link yourself by
     text, chat, or your own email.
   </Step>
   <Step title="Create invite">
@@ -47,6 +51,10 @@ Every invite link:
 The link is shown only in the panel when you create it. It isn't stored
 anywhere you can look it up later. Redis keeps only a hash of it.
 
+Creating an invite also creates the person's account record right away, with
+status **Invited**, so it shows up in the [Users tray](#seeing-who-has-an-account)
+even if they never accept.
+
 <Note>
   You can't invite someone who already has an active account. You'll see
   "That person already has an account" and should tell them to sign in.
@@ -64,30 +72,72 @@ anywhere you can look it up later. Redis keeps only a hash of it.
   </Step>
   <Step title="Confirm your email">
     Next comes a **Confirm your email** screen with numbered steps and a
-    **Resend confirmation email** button. They have **24 hours** to confirm.
-    After that, the confirmation link and the pending account both expire, and
-    they need a new invite. The app stays locked until they click it, even if they signed up
-    with Google.
+    **Resend confirmation email** button. Each confirmation link lasts **24
+    hours**, but the account itself doesn't expire: it stays **Awaiting email
+    confirmation** until they confirm, and Resend sends a fresh link any time.
+    The app stays locked until they click it, even if they signed up with
+    Google.
   </Step>
   <Step title="Signed in">
     Clicking **Confirm my email** on the page the link opens signs them in.
     After that they sign in with an emailed link or Google. See
     [Submitting a request](/staff/submitting-a-request#1-sign-in).
   </Step>
+  <Step title="Check their name">
+    On their first sign-in they see **Welcome! Please check your details**,
+    with the first and last name you entered. They fix any misspelling and
+    press **Save and continue**. See [Your profile](/staff/your-profile).
+  </Step>
 </Steps>
+
+## Seeing who has an account
+
+Click **Users** in the header (inviters only, next to **Invite**). A panel
+slides in from the right listing every account, sorted by name:
+
+| Shown | Meaning |
+|---|---|
+| Name and email | The account's first and last name (or the email, if it has no name) |
+| Status badge | **Invited**, **Awaiting email confirmation**, **Active**, or **Disabled** — see below |
+| Invited | When the latest invite was sent, and by whom. **—** if the account wasn't invited (for example, an inviter who bootstrapped by signing in) |
+| Accepted | When they confirmed their email. **Never** if they haven't yet |
+| Last login | Their most recent sign-in. **Never** if none is recorded |
+
+<Note>
+  Last login is recorded only from this release on. Someone who last signed
+  in before then shows **Never** until their next sign-in. Older accounts'
+  **Accepted** date comes from the confirmation time they already had on
+  record.
+</Note>
+
+### Account statuses
+
+| Status | Badge | What it means | Can sign in? |
+|---|---|---|---|
+| `invited` | Invited | An invite was created; they haven't registered | No |
+| `pending` | Awaiting email confirmation | They registered with the invite but haven't clicked the confirmation link | No |
+| `active` | Active | Confirmed (or an inviter's auto-created account) | Yes |
+| `disabled` | Disabled | Access revoked by hand (see below) | No |
+
+None of these expire. An `invited` record stays even after its 48-hour link
+has lapsed, and a `pending` record stays until they confirm.
 
 ## Re-inviting
 
-Create a new invite for the same email. This works when:
+Create a new invite for the same email. This works for anyone **Invited** or
+**Awaiting email confirmation**, and it refreshes their first and last name
+and the invite date in the Users tray. Use it when:
 
 - **The invite expired or was lost.** It's unused after 48 hours.
-- **They registered but never confirmed.** Pending accounts expire after **24
-  hours**, at the same time as the confirmation link. Once that happens, there's
-  nothing left to resend, so send a new invite. You can also re-invite a
-  still-pending account if they closed the screen that has the Resend button.
-  Registering again replaces the pending record.
+- **You misspelled their name.** Re-invite with the correct spelling (or let
+  them fix it on their first sign-in).
+- **They registered but closed the screen with the Resend button.** Their
+  account is still pending, so a new invite lets them register again and get
+  a fresh confirmation email. If they still have that screen open, **Resend
+  confirmation email** is enough.
 - **You mistyped their address.** Invite the correct address. The old invite
-  simply expires.
+  simply expires, but its **Invited** record stays in the Users tray until you
+  delete it (see [Fixing a record](#fixing-a-record)).
 
 Old invites can't be cancelled, but they only work for the address they were
 created for, and they expire on their own.
@@ -105,7 +155,7 @@ to **disable** their record:
   <Step title="Find their key">
     Search for `user:<their email, lowercased>`, for example
     `user:jane.doe@example.com`. The value looks like
-    `{ "email": …, "status": "active", "provider": "email", "invitedBy": …, … }`.
+    `{ "email": …, "firstName": …, "lastName": …, "status": "active", "provider": "email", "invitedBy": …, … }`.
   </Step>
   <Step title="Set status to disabled">
     Edit the value and change `"status": "active"` to `"status": "disabled"`.
@@ -136,6 +186,26 @@ Re-inviting won't do it: `create-invite` refuses a disabled account (409
 "That account is disabled"), and an invite sent before they were disabled
 is rejected at registration (403). A disabled account only comes back when
 someone deliberately edits the record.
+
+## Fixing a record
+
+Most fixes don't need Redis. People correct their own name under **Profile**,
+and most can change their own sign-in email there too (see
+[Your profile](/staff/your-profile)). For anything else, edit the
+`user:<email>` key in the Upstash Data Browser, as above:
+
+- **Wrong name**: edit `firstName` / `lastName`. The header and future tasks
+  use it on the next request.
+- **Stale invite** (mistyped address, person no longer coming): delete the
+  `user:<that address>` key to remove it from the Users tray. If the 48-hour
+  link is still live it can still be used to register, which recreates the
+  record.
+- **Inviter's email**: inviters can't change their address in the app.
+  Replace it in `INVITER_EMAILS` (see below). The new address gets a fresh
+  account on its first sign-in; disable or delete the old record.
+
+Leave `status`, the timestamps, and the other fields as they are unless you
+mean to change them.
 
 ## Adding or removing inviters
 

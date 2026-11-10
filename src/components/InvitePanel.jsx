@@ -4,6 +4,8 @@ import { ErrorText, inputClass } from './AuthLayout.jsx'
 
 /** Inviter-only panel: create a one-time, 48-hour invite link. */
 export default function InvitePanel({ onClose, onSessionExpired }) {
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
   const [sendEmail, setSendEmail] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -17,8 +19,10 @@ export default function InvitePanel({ onClose, onSessionExpired }) {
     setError(null)
     setCopied(false)
     try {
-      const res = await createInvite(email, sendEmail)
-      setResult({ ...res, email: email.trim(), requestedEmail: sendEmail })
+      const res = await createInvite({ email, firstName, lastName, sendEmail })
+      setResult({ ...res, email: email.trim(), name: `${firstName.trim()} ${lastName.trim()}`, requestedEmail: sendEmail })
+      setFirstName('')
+      setLastName('')
       setEmail('')
     } catch (err) {
       if (err.status === 401) return onSessionExpired()
@@ -44,6 +48,36 @@ export default function InvitePanel({ onClose, onSessionExpired }) {
         <button type="button" onClick={onClose} className="text-sm text-gray-500 hover:underline">Close</button>
       </div>
       <form onSubmit={handleSubmit} className="space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="invite-first" className="block text-sm font-medium text-gray-700 mb-1">First name</label>
+            <input
+              id="invite-first"
+              type="text"
+              required
+              maxLength={50}
+              autoComplete="off"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              className={inputClass}
+              disabled={busy}
+            />
+          </div>
+          <div>
+            <label htmlFor="invite-last" className="block text-sm font-medium text-gray-700 mb-1">Last name</label>
+            <input
+              id="invite-last"
+              type="text"
+              required
+              maxLength={50}
+              autoComplete="off"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              className={inputClass}
+              disabled={busy}
+            />
+          </div>
+        </div>
         <div>
           <label htmlFor="invite-email" className="block text-sm font-medium text-gray-700 mb-1">Their email</label>
           <input
@@ -74,10 +108,10 @@ export default function InvitePanel({ onClose, onSessionExpired }) {
         <div className="mt-5 rounded-lg bg-gray-50 border border-gray-200 p-4 text-sm">
           <p className="text-gray-700">
             {result.emailSent
-              ? <>Invite emailed to <strong>{result.email}</strong>. You can also share the link yourself:</>
+              ? <>Invite emailed to <strong>{result.name}</strong> ({result.email}). You can also share the link yourself:</>
               : result.requestedEmail
-                ? <>We couldn't email <strong>{result.email}</strong>. Copy the link and send it yourself:</>
-                : <>Invite for <strong>{result.email}</strong>. Copy the link and send it however you like:</>}
+                ? <>We couldn't email <strong>{result.name}</strong> ({result.email}). Copy the link and send it yourself:</>
+                : <>Invite for <strong>{result.name}</strong> ({result.email}). Copy the link and send it however you like:</>}
           </p>
           <div className="mt-2 flex gap-2">
             <input readOnly value={result.link} aria-label="Invite link" className={`${inputClass} font-mono text-xs`} onFocus={(e) => e.target.select()} />

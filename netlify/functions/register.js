@@ -1,7 +1,7 @@
 import { getRedis } from './_shared/redis.js'
 import { getUser, isValidEmail, normalizeEmail, saveUser } from './_shared/users.js'
 import { hashToken, isTokenShape } from './_shared/tokens.js'
-import { sendConfirmation, VERIFY_TTL_SEC } from './_shared/verification.js'
+import { sendConfirmation } from './_shared/verification.js'
 import { verifyGoogleIdToken } from './_shared/google.js'
 import { json, parseJsonPost } from './_shared/http.js'
 import { limit } from './_shared/rate-limit.js'
@@ -48,13 +48,27 @@ export async function handler(event) {
     // Check the account before consuming, so an already-active user keeps the invite unburned.
     const existing = await getUser(email)
     if (existing?.status === 'active') return json(409, { error: 'You already have an account. Please sign in.' })
-    if (existing && existing.status !== 'pending') return json(403, { error: 'This account has been disabled.' })
+    if (existing && !['invited', 'pending'].includes(existing.status)) return json(403, { error: 'This account has been disabled.' })
 
     // GETDEL is atomic: of two concurrent submits, only one gets the invite.
     if (!(await redis.getdel(key))) return INVITE_GONE()
 
-    // Pending accounts expire with their confirmation window; activation saves without a TTL.
-    await saveUser({ email, status: 'pending', provider, invitedBy: invite.invitedBy, createdAt: Date.now() }, VERIFY_TTL_SEC)
+    // The record stays (no TTL) so the Users tray can show an unconfirmed
+    // registration; the confirmation token carries its own 24-hour expiry.
+    const now = Date.now()
+    await saveUser({
+      ...existing,
+      email,
+      firstName: invite.firstName ?? existing?.firstName ?? '',
+      lastName: invite.lastName ?? existing?.lastName ?? '',
+      status: 'pending',
+      provider,
+      invitedBy: invite.invitedBy,
+      invitedByName: invite.invitedByName ?? existing?.invitedByName,
+      invitedAt: existing?.invitedAt ?? invite.createdAt,
+      createdAt: existing?.createdAt ?? now,
+      registeredAt: now,
+    })
     const emailSent = await sendConfirmation(email)
     return json(200, { pending: true, email, emailSent })
   } catch (err) {

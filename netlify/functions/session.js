@@ -1,5 +1,5 @@
 import { getSession } from './_shared/session.js'
-import { isInviter } from './_shared/users.js'
+import { getUser, sessionPayload } from './_shared/users.js'
 import { json } from './_shared/http.js'
 
 // GET — tells the client who is signed in (the HttpOnly cookie is invisible
@@ -8,5 +8,12 @@ export async function handler(event) {
   if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' }
   const { email } = await getSession(event)
   if (!email) return json(200, { authenticated: false })
-  return json(200, { authenticated: true, email, canInvite: isInviter(email) })
+  try {
+    const user = await getUser(email)
+    if (!user) return json(200, { authenticated: false })
+    return json(200, sessionPayload(user))
+  } catch (err) {
+    console.error(`[session] ${err.message}`)
+    return json(200, { authenticated: false })
+  }
 }

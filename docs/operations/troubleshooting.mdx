@@ -105,7 +105,8 @@ failure in this order:
   <Accordion title="'This invite link has expired or has already been used'">
     Invites last 48 hours and work once. A malformed link (for example,
     truncated when it was pasted) gives the same 410. The inviter creates a new
-    invite. Inviting someone with a `pending` account is allowed. See
+    invite. Re-inviting someone whose account is `invited` or `pending` is
+    allowed. See
     [Inviting users](/operations/inviting-users#re-inviting).
   </Accordion>
   <Accordion title="'That email does not match the one this invite was sent to'">
@@ -129,16 +130,18 @@ failure in this order:
     Their account is already `active`. They should sign in, not register.
   </Accordion>
   <Accordion title="Registered but stuck on 'Confirm your email'">
-    The account is `pending` until the confirmation link is used. The person
-    presses **Resend confirmation email** (3 per 10 minutes). Pending accounts
-    **expire after 24 hours**. After that, or if they closed that screen,
-    re-invite them. The app stays locked for pending accounts, even with
-    Google.
+    The account is `pending` (**Awaiting email confirmation** in the Users
+    tray) until a confirmation link is used. The person presses **Resend
+    confirmation email** (3 per 10 minutes). Each link lasts 24 hours, but the
+    pending account doesn't expire, so Resend works any time. If they closed
+    that screen, re-invite them. The app stays locked for pending accounts,
+    even with Google.
   </Accordion>
   <Accordion title="'This confirmation link / sign-in link has expired or was already used'">
-    Sign-in links last 15 minutes and confirmation links 24 hours, and each
-    works once. Pages from emailed links spend the token only when the button
-    is pressed, so a mail scanner shouldn't use it up. If people keep seeing
+    Sign-in links last 15 minutes, email-change links (both the approval and the new-address link) 1 hour, and confirmation
+    links 24 hours, and each works once. Pages from emailed links spend the
+    token only when the button is pressed, so a mail scanner shouldn't use it
+    up. If people keep seeing
     this right away, check whether the link was forwarded or opened twice.
   </Accordion>
   <Accordion title="Inviter sees no Invite button">
@@ -148,7 +151,8 @@ failure in this order:
   <Accordion title="An inviter can't sign in even though they're in INVITER_EMAILS">
     Auto-provisioning only happens when **no** `user:` record exists. If their
     record is `pending` (they registered through an invite and didn't confirm)
-    or `disabled`, it's respected. Set `status` to `"active"` in the Data
+    or `disabled`, it's respected. An `invited` record (someone also sent them
+    an invite) doesn't block them: signing in activates it. Set `status` to `"active"` in the Data
     Browser, or delete the record so they bootstrap again.
   </Accordion>
 </AccordionGroup>
@@ -268,8 +272,8 @@ Full detail: [Roster management](/operations/roster-management).
 ## Task creation fails
 
 <AccordionGroup>
-  <Accordion title="422 'Unknown follower or assignee'">
-    The submitted GID isn't in `data/roster.json`. Most likely the roster changed
+  <Accordion title="422 'Unknown assignee'">
+    The submitted assignee GID isn't in `data/roster.json`. Most likely the roster changed
     in Notion but the deployed build still has the old one — rebuild. If it
     persists, the `Asana GID` value in Notion is wrong.
   </Accordion>

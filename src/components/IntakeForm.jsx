@@ -1,30 +1,22 @@
 import { useEffect, useState } from 'react'
-import { STAFF, findStaff } from '../config/staff.js'
+import { STAFF } from '../config/staff.js'
 
-const BLANK = { name: '', title: '', details: '', dueDate: '', assigneeGid: '' }
+const BLANK = { title: '', details: '', dueDate: '', assigneeGid: '' }
 const MAX_FILE_BYTES = 700 * 1024
 const ACCEPTED_TYPES = '.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg'
 
 function validate(form) {
   const errs = {}
-  if (!form.name) errs.name = 'Please select your name.'
   if (!form.title.trim()) errs.title = 'Request title is required.'
   if (!form.details.trim()) errs.details = 'Request details are required.'
   return errs
 }
 
-// accountEmail is the signed-in email. It is shown read-only: the server
-// attributes the task to the session, so an editable field would mislead.
-export default function IntakeForm({ onSubmit, onFileChange, frozen, submitting, apiError, initialData, accountEmail = '' }) {
-  const [form, setForm] = useState(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem('ogc_last_submitter') ?? 'null')
-      if (stored?.name) return { ...BLANK, name: stored.name }
-    } catch {}
-    // First visit: pre-select the roster entry whose email matches the account.
-    const match = accountEmail && STAFF.find((s) => s.email?.toLowerCase() === accountEmail.toLowerCase())
-    return match ? { ...BLANK, name: match.name } : BLANK
-  })
+// The submitter is always the signed-in account. Name and email ride along
+// as hidden fields (the server re-derives both from the session anyway, so
+// nobody can file a request in someone else's name).
+export default function IntakeForm({ onSubmit, onFileChange, frozen, submitting, apiError, initialData, accountName = '', accountEmail = '' }) {
+  const [form, setForm] = useState(BLANK)
   const [errors, setErrors] = useState({})
   const [selectedFile, setSelectedFile] = useState(null)
   const [fileError, setFileError] = useState(null)
@@ -33,7 +25,6 @@ export default function IntakeForm({ onSubmit, onFileChange, frozen, submitting,
     if (initialData) {
       setForm((prev) => ({
         ...prev,
-        name: initialData.submitterName ?? prev.name,
         title: initialData.title ?? prev.title,
         details: initialData.details ?? prev.details,
         dueDate: initialData.dueDate ?? prev.dueDate,
@@ -41,18 +32,6 @@ export default function IntakeForm({ onSubmit, onFileChange, frozen, submitting,
       }))
     }
   }, [initialData])
-
-  const handleNameChange = (e) => {
-    const name = e.target.value
-    const staff = findStaff(name)
-    setForm((prev) => ({
-      ...prev,
-      name,
-      assigneeGid: prev.assigneeGid === staff?.asanaGid ? '' : prev.assigneeGid,
-    }))
-    if (name) localStorage.setItem('ogc_last_submitter', JSON.stringify({ name }))
-    setErrors((prev) => ({ ...prev, name: undefined }))
-  }
 
   const handleField = (field) => (e) => {
     setForm((prev) => ({ ...prev, [field]: e.target.value }))
@@ -86,14 +65,12 @@ export default function IntakeForm({ onSubmit, onFileChange, frozen, submitting,
       setErrors(errs)
       return
     }
-    const staff = findStaff(form.name)
     onSubmit({
-      submitterName: form.name,
+      submitterName: accountName || accountEmail,
       submitterEmail: accountEmail,
       title: form.title,
       details: form.details,
       dueDate: form.dueDate || null,
-      followerGid: staff?.asanaGid,
       assigneeGid: form.assigneeGid || null,
     })
   }
@@ -103,44 +80,8 @@ export default function IntakeForm({ onSubmit, onFileChange, frozen, submitting,
       <form onSubmit={handleSubmit} noValidate className="space-y-5">
         <fieldset disabled={frozen} className="contents">
 
-          {/* Name */}
-          <div>
-            <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
-              Your Name <span className="text-red-500">*</span>
-            </label>
-            <select
-              id="name"
-              value={form.name}
-              onChange={handleNameChange}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="">— Select your name —</option>
-              {STAFF.map((s) => (
-                <option key={s.name} value={s.name}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name}</p>}
-          </div>
-
-          {/* Email */}
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-              Your Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              value={accountEmail}
-              readOnly
-              aria-describedby="email-help"
-              className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600 cursor-default focus:outline-none"
-            />
-            <p id="email-help" className="mt-1 text-xs text-gray-400">
-              The email you signed in with. Your request is recorded under this address.
-            </p>
-          </div>
+          <input type="hidden" name="submitterName" value={accountName || accountEmail} />
+          <input type="hidden" name="submitterEmail" value={accountEmail} />
 
           {/* Title */}
           <div>
@@ -200,7 +141,7 @@ export default function IntakeForm({ onSubmit, onFileChange, frozen, submitting,
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="">— Unassigned —</option>
-              {STAFF.filter((s) => s.name !== form.name).map((s) => (
+              {STAFF.map((s) => (
                 <option key={s.asanaGid} value={s.asanaGid}>
                   {s.name}
                 </option>

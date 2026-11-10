@@ -32,8 +32,15 @@ export function createFakeRedis() {
       return deserialize(live(key)?.value)
     },
     async set(key, value, opts = {}) {
+      if (opts.nx && live(key)) return null
+      if (opts.xx && !live(key)) return null
       store.set(key, { value: serialize(value), expiresAt: opts.ex ? Date.now() + opts.ex * 1000 : null })
       return 'OK'
+    },
+    /** Single-pass SCAN: returns every live key matching a `prefix*` glob, cursor "0". */
+    async scan(_cursor, opts = {}) {
+      const prefix = (opts.match ?? '*').replace(/\*$/, '')
+      return ['0', [...store.keys()].filter((k) => k.startsWith(prefix) && live(k))]
     },
     async getdel(key) {
       const entry = live(key)
@@ -83,11 +90,10 @@ export function tokenFromLastEmail(fetchMock, path) {
   return new RegExp(`/${path}\\?token=([A-Za-z0-9_-]{43})`).exec(body.text)[1]
 }
 
-/** Seeds an active user plus a live session; returns the request Cookie header. */
-export async function seedSession(redis, email = 'member@example.com') {
+/** Seeds an active user (plus any extra fields) and a live session; returns the request Cookie header. */
+export async function seedSession(redis, email = 'member@example.com', fields = {}, id = 'S'.repeat(43)) {
   const { hashToken } = await import('../../_shared/tokens.js')
-  const id = 'S'.repeat(43)
-  await redis.set(`user:${email}`, { email, status: 'active' })
+  await redis.set(`user:${email}`, { email, status: 'active', ...fields })
   await redis.set(`sess:${hashToken(id)}`, { email }, { ex: 1800 })
   return `ogc_session=${id}`
 }

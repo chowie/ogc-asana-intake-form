@@ -27,7 +27,10 @@ async function call(name, { method = 'POST', body } = {}) {
   return data
 }
 
-/** { authenticated, email?, canInvite? } — also counts as activity for the 30-min window. */
+/**
+ * { authenticated, email?, name?, firstName?, lastName?, canInvite?, canChangeEmail?, needsProfile? }
+ * — also counts as activity for the 30-min window.
+ */
 export const getSession = () => call('session', { method: 'GET' })
 export const logout = () => call('logout')
 
@@ -42,11 +45,17 @@ export const registerWithGoogle = (inviteToken, googleCredential) =>
 export const confirmEmail = (token) => call('verify-email', { body: { token } })
 export const resendConfirmation = (email) => call('verify-email', { body: { resend: email } })
 
-export const createInvite = (email, sendEmail) => call('create-invite', { body: { email, sendEmail } })
+export const createInvite = ({ email, firstName, lastName, sendEmail }) =>
+  call('create-invite', { body: { email, firstName, lastName, sendEmail } })
+export const listUsers = () => call('list-users', { method: 'GET' })
 
-const ROUTES = { '/invite': 'invite', '/verify': 'verify', '/login': 'login' }
+export const saveProfile = (firstName, lastName) => call('profile', { body: { firstName, lastName } })
+export const requestEmailChange = (newEmail) => call('change-email', { body: { newEmail } })
+export const confirmEmailChange = (token) => call('change-email', { body: { token } })
 
-/** Reads a token-bearing route (/invite, /verify, /login) from the URL, or null. */
+const ROUTES = { '/invite': 'invite', '/verify': 'verify', '/login': 'login', '/email-change': 'emailChange', '/email-change-verify': 'emailVerify' }
+
+/** Reads a token-bearing route (/invite, /verify, /login, /email-change[-verify]) from the URL, or null. */
 export function parseAuthRoute(loc = window.location) {
   const kind = ROUTES[loc.pathname.replace(/\/$/, '')]
   const token = new URLSearchParams(loc.search).get('token')

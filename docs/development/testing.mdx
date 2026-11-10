@@ -1,6 +1,6 @@
 ---
 title: "Testing"
-description: "Vitest + Testing Library. 131 tests across 11 files."
+description: "Vitest + Testing Library. 174 tests across 13 files."
 icon: "flask"
 ---
 
@@ -17,13 +17,15 @@ file is `src/test/setup.js`.
 
 | File | Tests | Covers |
 |---|--:|---|
-| `netlify/functions/__tests__/auth-flow.test.js` | 40 | End-to-end auth against an in-memory Redis: `create-invite` (401/403, emailed vs copy-only, hash-only storage, 409, 422); `register` (mismatch doesn't consume, case-insensitive match, one-time, 48 h expiry boundary, pending until confirmed, Google match/mismatch/invalid); `verify-email` (activation + session, one-time, resend); `login` (no enumeration, inviter bootstrap, magic link one-time + 15 min, Google active-only, 415 without JSON); session lifetime (30-min sliding expiry, guard slides too, `canInvite`, logout, revoke by deleting the user, fails closed without Redis, forged cookie); security-review regressions (confirmation link can't re-activate a `disabled` account, a disabled inviter isn't re-provisioned, pending accounts expire with the confirmation window, display-name/quoted email syntax rejected, stored values survive Upstash-style deserialization, re-inviting a disabled account does not revive it) |
-| `src/__tests__/App.test.jsx` | 24 | Auth gating (no session / session check fails / signed in), no auth state in `localStorage`, sign out, Google sign-in; 401 from chat or `createTask` drops to sign-in and keeps the request; sign-in in another tab resumes on focus; `/invite`, `/verify`, `/login` routes (token stripped from URL, spent only on click, app locked until confirmed, mismatch error); Invite button for inviters only, emailed and copy-only invites; chat error paths, clear → summarized recursion, confirm flow, double-click guard, attachment-failure warning |
-| `src/__tests__/IntakeForm.test.jsx` | 20 | Read-only account email + roster name pre-select, validation, submit payload, frozen/submitting/apiError states, file accept/reject/clear, self-assignment reset, `localStorage` persistence, `initialData` re-population |
+| `netlify/functions/__tests__/auth-flow.test.js` | 50 | End-to-end auth against an in-memory Redis: `create-invite` (401/403, emailed vs copy-only, hash-only storage, 409, 422, first/last name required, personalized and HTML-escaped email, `invited` record outlives the link and re-invite refreshes names); `register` (mismatch doesn't consume, case-insensitive match, one-time, 48 h expiry boundary, pending until confirmed, Google match/mismatch/invalid); `verify-email` (activation + session, one-time, resend); `login` (no enumeration, inviter bootstrap, magic link one-time + 15 min, Google active-only, 415 without JSON); session lifetime (30-min sliding expiry, guard slides too, `canInvite`, logout, revoke by deleting the user, fails closed without Redis, forged cookie); `profile` (`needsProfile` until saved, 401/422, email fallback name); last-login recording; security-review regressions (confirmation link can't re-activate a `disabled` account, a disabled inviter isn't re-provisioned, pending accounts persist while the confirmation link still expires in 24 h, an `invited` account can't sign in, an invited inviter can still bootstrap, display-name/quoted email syntax rejected, stored values survive Upstash-style deserialization, re-inviting a disabled account does not revive it) |
+| `src/__tests__/App.test.jsx` | 34 | Auth gating (no session / session check fails / signed in, header shows the account name), no auth state in `localStorage`, sign out, Google sign-in; 401 from chat or `createTask` drops to sign-in and keeps the request; sign-in in another tab resumes on focus; `/invite`, `/verify`, `/login` routes (token stripped from URL, spent only on click, app locked until confirmed, mismatch error); Invite button for inviters only, emailed and copy-only invites; first-sign-in profile review and the Profile link; email change (request, mismatch, hidden for Google/inviters, `/email-change` and `/email-change-verify` spent on click); Users tray (inviters only, "Never" dates, 401); chat error paths, clear → summarized recursion, confirm flow, double-click guard, attachment-failure warning |
+| `src/__tests__/IntakeForm.test.jsx` | 16 | No name picker or email field, name/email in hidden fields (email fallback), validation, submit payload with no follower, full roster in Assign to, frozen/submitting/apiError states, file accept/reject/clear, `initialData` re-population |
 | `src/__tests__/PhilipChat.test.jsx` | 14 | Header, message rendering, typing indicator, send on click/Enter, input cleared, disabled during AI wait, summary panel show/hide, confirm/edit |
 | `netlify/functions/_shared/__tests__/google.test.js` | 8 | Real `jose` verification with locally generated keys: valid token, wrong audience, wrong issuer, unknown key, expired, unverified email, `GOOGLE_CLIENT_ID` unset, garbage |
-| `netlify/functions/__tests__/create-task.test.js` | 8 | Session guard (401), unknown follower/assignee GID rejection, empty-summary rejection, details fallback, notes built from a complete summary, submitter email taken from the session (spoofed `submitterEmail` ignored), non-JSON content type (415) |
+| `netlify/functions/__tests__/create-task.test.js` | 12 | Session guard (401), unknown assignee GID rejection, no followers added, name from the account (body `submitterName` ignored, email fallback), receipt email (sent, and 200 even when it fails), empty-summary rejection, details fallback, notes built from a complete summary, submitter email taken from the session (spoofed `submitterEmail` ignored), non-JSON content type (415) |
 | `netlify/functions/_shared/__tests__/timing.test.js` | 2 | `padTo()` waits out the rest of the response floor, and doesn't wait once the floor has passed |
+| `netlify/functions/__tests__/change-email.test.js` | 20 | Request: 401, approval link to the **old** address, nothing changes before both links are used, 403 for Google and inviters, 409 for any existing account or an inviter address, 422. Approve → verify link to the new address; verify moves the account, ends old sessions, signs in as the new address; one-time; 1 h expiry; 409 if claimed meanwhile; 410 if disabled meanwhile or garbage token; races (two links at once, sign-in during the move, re-created old address) |
+| `netlify/functions/__tests__/list-users.test.js` | 3 | 401, inviter-only 403, every account with invite / acceptance / last-login dates (`null` = never) |
 | `netlify/functions/__tests__/chat.test.js` | 5 | Session guard (401), `needs_clarification` passthrough, 502 on `summarized` with a missing summary, 200 on a complete summary, user fields kept out of the system prompt |
 | `netlify/functions/__tests__/attach-task.test.js` | 5 | Session guard (401), MIME allowlist (415), size cap (413), out-of-project task rejection (403), successful upload |
 | `netlify/functions/__tests__/redis-keepalive.test.js` | 3 | Writes `keepalive:last`, 500 when Redis is unset, 500 when the write fails |
@@ -37,7 +39,7 @@ happens to be in `data/roster.json`.
 
 ```js
 const { STAFF } = vi.hoisted(() => ({ STAFF: [/* fixtures */] }))
-vi.mock('../config/staff.js', () => ({ STAFF, findStaff: (n) => ... }))
+vi.mock('../config/staff.js', () => ({ STAFF }))
 ```
 
 **Mocking fetch.** `vi.stubGlobal('fetch', ...)` is used in `App.test.jsx` and
@@ -47,14 +49,15 @@ calls, so tests can pull the token out of the "sent" email
 
 **Fake Redis.** `netlify/functions/__tests__/helpers/fake-redis.js` is a small
 in-memory stand-in for the `@upstash/redis` client. It covers only the commands
-the auth code uses (`get`, `set` with `ex`, `getex`, `getdel`, `del`). It also
+the auth code uses (`get`, `set` with `ex` / `nx` / `xx`, `getex`, `getdel`, `del`, and a single-pass `scan` for `prefix*` matches). It also
 mimics Upstash serialization: strings are stored raw, everything else as JSON,
 and every read is `JSON.parse`d with a raw-string fallback. That way, tests
 catch values that wouldn't round-trip through the real client. Tests
 swap it in with `vi.mock('../_shared/redis.js')`. TTLs read `Date.now()`, so
-`vi.setSystemTime` / `vi.advanceTimersByTime` drive expiry. `seedSession()`
-creates an active user plus a session and returns the cookie. The
-`create-task`, `chat`, and `attach-task` tests use it.
+`vi.setSystemTime` / `vi.advanceTimersByTime` drive expiry. `seedSession(redis, email, fields, id)`
+creates an active user (with any extra record fields, such as names or
+`provider`) plus a session and returns the cookie. The `create-task`, `chat`,
+`attach-task`, `change-email`, and `list-users` tests use it.
 
 **Google.** `auth-flow.test.js` mocks `verifyGoogleIdToken`, where
 `"google:<email>"` stands in for a valid token. `google.test.js` runs the real

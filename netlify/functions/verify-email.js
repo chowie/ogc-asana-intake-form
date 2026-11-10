@@ -1,6 +1,6 @@
 import { getRedis } from './_shared/redis.js'
-import { createSession } from './_shared/session.js'
-import { getUser, isInviter, normalizeEmail, saveUser } from './_shared/users.js'
+import { signedInResponse } from './_shared/session.js'
+import { getUser, normalizeEmail, saveUser } from './_shared/users.js'
 import { hashToken, isTokenShape } from './_shared/tokens.js'
 import { sendConfirmation } from './_shared/verification.js'
 import { json, parseJsonPost } from './_shared/http.js'
@@ -36,11 +36,10 @@ export async function handler(event) {
 
     const user = await getUser(email)
     // Only a pending account can be activated; a disabled one stays disabled.
-    if (user?.status === 'pending') await saveUser({ ...user, status: 'active', verifiedAt: Date.now() })
+    if (user?.status === 'pending') await saveUser({ ...user, status: 'active', acceptedAt: Date.now() })
     else if (user?.status !== 'active') return gone
 
-    const setCookie = await createSession(email)
-    return json(200, { authenticated: true, email, canInvite: isInviter(email) }, { 'Set-Cookie': setCookie })
+    return await signedInResponse(email, 'email') // they arrived via the emailed link
   } catch (err) {
     console.error(`[verify-email] ${err.message}`)
     return json(503, { error: 'Email confirmation is temporarily unavailable.' })

@@ -1,6 +1,7 @@
 import { getRedis } from './redis.js'
 import { hashToken, newToken } from './tokens.js'
 import { appUrl, json } from './http.js'
+import { sessionPayload, updateUser } from './users.js'
 
 export const SESSION_TTL_SEC = 30 * 60 // sliding: refreshed on every authenticated request
 export const COOKIE_NAME = 'ogc_session'
@@ -30,6 +31,18 @@ export async function createSession(email) {
   return cookie(id)
 }
 
+/**
+ * Starts a session for an active user, records the login (shown in the
+ * Users tray), and returns the 200 response carrying the session cookie.
+ * method: 'email' (magic link / confirmation link) or 'google'.
+ */
+export async function signedInResponse(email, method) {
+  const user = await updateUser(email, { lastLoginAt: Date.now(), lastLoginMethod: method })
+  if (user?.status !== 'active') return json(410, { error: 'This account is no longer available. Please sign in again.' })
+  const setCookie = await createSession(email)
+  return json(200, sessionPayload(user), { 'Set-Cookie': setCookie })
+}
+
 /** Returns { email } for a live session (sliding its TTL), else { email: null }. Fails closed. */
 export async function getSession(event) {
   const id = readCookie(event)
@@ -37,12 +50,17 @@ export async function getSession(event) {
   const redis = getRedis()
   if (!redis) return { email: null }
   try {
-    const email = (await redis.getex(`sess:${hashToken(id)}`, { ex: SESSION_TTL_SEC }))?.email
+    const key = `sess:${hashToken(id)}`
+    const email = (await redis.getex(key, { ex: SESSION_TTL_SEC }))?.email
     if (!email) return { email: null }
     // Re-check the account on every request so deleting a user (or setting
-    // status to anything but active) revokes access immediately.
+    // status to anything but active) revokes access immediately. The dead
+    // session is deleted too, so it can't come back to life if that address
+    // is later re-created (e.g. re-invited after an email change).
     const user = await redis.get(`user:${email}`)
-    return { email: user?.status === 'active' ? email : null }
+    if (user?.status === 'active') return { email }
+    await redis.del(key)
+    return { email: null }
   } catch (err) {
     console.error(`[session] lookup failed: ${err.message}`)
     return { email: null }
