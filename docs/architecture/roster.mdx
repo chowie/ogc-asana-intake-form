@@ -8,9 +8,14 @@ The deacon roster — name, email, Asana GID — lives in a Notion database. At 
 time `scripts/fetch-roster.mjs` pulls it and writes `data/roster.json`, which two
 consumers read:
 
-- `src/config/staff.js` → the `STAFF` dropdown and `findStaff()`
+- `src/config/staff.js` → `STAFF`, the **Assign to** dropdown
 - `netlify/functions/_shared/roster.js` → `isValidGid()`, the server-side
-  follower/assignee allowlist
+  assignee allowlist
+
+The roster no longer identifies the submitter. Who submitted a request comes
+from their account (see [Authentication](/architecture/authentication)), so
+someone can sign in and submit without being on the roster; they just can't be
+assigned tasks.
 
 One file, two jobs: it populates the UI *and* defines which Asana users a request
 is allowed to touch.
@@ -21,9 +26,9 @@ Property names must match exactly.
 
 | Property | Type | Notes |
 |---|---|---|
-| `Name` | Title | Full name shown in the dropdown |
-| `Email` | Email | Auto-filled in the form |
-| `Asana GID` | Text | Asana user GID — used as follower/assignee |
+| `Name` | Title | Full name shown in the **Assign to** dropdown |
+| `Email` | Email | Required by the fetch script; not shown in the form |
+| `Asana GID` | Text | Asana user GID — used as the assignee |
 | `Active` | Checkbox | Optional. If the property exists, only checked rows are included |
 
 ## The fetch script
@@ -48,7 +53,7 @@ Behavior:
   fallback.
 - **Exits 1** when Notion returned rows but *zero* survived validation. That
   signature means a property was renamed, and deploying an empty roster would
-  ship a blank staff dropdown. It fails the build instead.
+  ship a blank **Assign to** dropdown. It fails the build instead.
 
 ## What's committed
 

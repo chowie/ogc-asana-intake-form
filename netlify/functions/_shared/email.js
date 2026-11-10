@@ -28,13 +28,16 @@ function layout(heading, body, link, cta) {
 </div>`
 }
 
-export function inviteEmail({ to, link, invitedBy }) {
-  const intro = `${invitedBy} invited you to the Oneida Gospel Church Deacon Board request form. This link works once and expires in 48 hours.`
+export function inviteEmail({ to, firstName, link, inviterName, inviterEmail }) {
+  const greeting = firstName ? `Hi ${firstName},` : 'Hi,'
+  const from = inviterName && inviterName !== inviterEmail ? `${inviterName} (${inviterEmail})` : inviterEmail
+  const intro = `${from} has invited you to the Oneida Gospel Church Deacon Board request form — the place to send requests to the deacons so they're tracked and followed up on.`
+  const fine = 'This link works once and expires in 48 hours. If you have questions about this invitation, contact ' + from + ' directly.'
   return {
     to,
-    subject: "You're invited to the OGC Deacon Board request form",
-    text: `${intro}\n\nAccept the invite: ${link}`,
-    html: layout("You're invited", escape(intro), link, 'Accept invite'),
+    subject: `${inviterName || 'A deacon'} invited you to the OGC Deacon Board request form`,
+    text: `${greeting}\n\n${intro}\n\nAccept the invite: ${link}\n\n${fine}`,
+    html: layout("You're invited", `${escape(greeting)}<br><br>${escape(intro)}<br><br>${escape(fine)}`, link, 'Accept invite'),
   }
 }
 
@@ -55,5 +58,39 @@ export function loginEmail({ to, link }) {
     subject: 'Your sign-in link — OGC Deacon Board requests',
     text: `${intro}\n\nSign in: ${link}`,
     html: layout('Sign in', intro, link, 'Sign in'),
+  }
+}
+
+export function emailChangeEmail({ to, newEmail, link }) {
+  const intro = `Someone signed in to your OGC Deacon Board request form account asked to change its sign-in email from ${to} to ${newEmail}. If this was you, click the button below to approve it; we'll then send a link to the new address to confirm it's yours. If it wasn't you, ignore this email — nothing will change. The link works once and expires in 1 hour.`
+  return {
+    to,
+    subject: 'Confirm your email change — OGC Deacon Board requests',
+    text: `${intro}\n\nConfirm the change: ${link}`,
+    html: layout('Confirm your email change', escape(intro), link, 'Yes, I requested this'),
+  }
+}
+
+export function newAddressEmail({ to, link }) {
+  const intro = 'Your request to make this your sign-in email for the OGC Deacon Board request form was approved from your previous address. Click below to confirm this address is yours and finish the change. The link works once and expires in 1 hour.'
+  return {
+    to,
+    subject: 'Confirm your new sign-in email — OGC Deacon Board requests',
+    text: `${intro}\n\nConfirm this address: ${link}`,
+    html: layout('Confirm your new email', escape(intro), link, 'Confirm this address'),
+  }
+}
+
+export const FOLLOW_HELP =
+  'To get updates, open the task in Asana and click Follow. You will need a free Asana account; the first time, Asana may ask you to "Request access", which a deacon will approve.'
+
+export function taskCreatedEmail({ to, name, title, taskUrl }) {
+  const greeting = name ? `Hi ${name},` : 'Hi,'
+  const intro = `Your request "${title}" has been added to the Deacon Board's task list.`
+  return {
+    to,
+    subject: `Request received: ${String(title).replace(/\s+/g, ' ').slice(0, 120)}`,
+    text: `${greeting}\n\n${intro}\n\n${FOLLOW_HELP}\n\nView the task: ${taskUrl}`,
+    html: layout('Request received', `${escape(greeting)}<br><br>${escape(intro)}<br><br>${escape(FOLLOW_HELP)}`, taskUrl, 'Open in Asana'),
   }
 }

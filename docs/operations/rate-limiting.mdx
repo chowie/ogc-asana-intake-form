@@ -29,11 +29,15 @@ keep production active. See
 | `verify-email` | `verify-email { token }` | 10 / min | Token guessing |
 | `resend-verify` | `verify-email { resend }` | 3 / 10 min | Email flooding |
 | `create-invite` | `create-invite` | 20 / hour | Caps invite emails, even from an inviter's account |
+| `profile` | `profile` | 20 / 10 min | Repeated name saves |
+| `change-email-request` | `change-email { newEmail }` | 5 / hour | Email flooding through confirmation requests |
+| `change-email-confirm` | `change-email { token }` (both links) | 10 / min | Token guessing |
+| `create-task` | `create-task` | 30 / hour | Each task sends a receipt email |
 | `chat` | `chat` | 20 / min | Anthropic spend |
 
-`create-task` and `attach-task` aren't rate-limited. They already require a
-live session, and Asana enforces its own limits. `session` and `logout` aren't
-limited either.
+`attach-task` isn't rate-limited. It already requires a live session, and
+Asana enforces its own limits. `session`, `list-users`
+(inviter-only), and `logout` aren't limited either.
 
 ## How it works
 

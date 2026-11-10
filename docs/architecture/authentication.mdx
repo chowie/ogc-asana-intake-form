@@ -18,7 +18,7 @@ record in Upstash Redis.
 
 | Who | How they get in |
 |---|---|
-| **Inviter** | Email listed in `INVITER_EMAILS`. Can sign in with no invite: if **no `user:` record exists**, the first sign-in creates an `active` account (bootstrap). An existing record is respected as-is, so a `disabled` inviter stays disabled. Sees an **Invite** button in the app header. |
+| **Inviter** | Email listed in `INVITER_EMAILS`. Can sign in with no invite: if **no `user:` record exists**, the first sign-in creates an `active` account (bootstrap). An `invited` record (an inviter who was also sent an invite) is activated the same way, keeping the invite's names. Any other existing record is respected as-is, so a `disabled` inviter stays disabled. Sees **Invite** and **Users** buttons in the app header. Can't change their email in the app. |
 | **Member** | Anyone else. Needs an invite, then has to confirm their email before the app unlocks. |
 
 `isInviter()` re-reads `INVITER_EMAILS` on every call, so it is checked on each
@@ -26,35 +26,55 @@ request, not stored on the account.
 
 ## Account lifecycle
 
+Every record moves through `invited` → `pending` → `active`. `disabled` is set
+only by hand. **No status has a TTL**: the record is durable from the moment
+the invite is created, so the Users tray can show invites that were never
+accepted and registrations that were never confirmed. Only the one-time
+tokens expire.
+
 <Steps>
   <Step title="Invite">
-    An inviter posts to `create-invite` with the invitee's email. The server
-    stores `invite:<sha256(token)>` → `{ email, invitedBy, createdAt }` with a
-    **48-hour** TTL and returns `/invite?token=…`. By default it also emails the
-    link. Inviting someone who already has an `active` account returns 409.
+    An inviter posts to `create-invite` with the invitee's first name, last
+    name, and email. The server stores `invite:<sha256(token)>` →
+    `{ email, firstName, lastName, invitedBy, invitedByName, createdAt }` with a
+    **48-hour** TTL, saves a durable `user:<email>` record with status
+    `invited` (a brand-new record is written with `SET NX`, so an account
+    created at the same moment is never overwritten; that race returns 409), and returns `/invite?token=…`. By default it also emails the
+    link, greeting the invitee by first name and naming the inviter as
+    "Name (email)". Inviting someone whose account is `active` or `disabled`
+    returns 409. Re-inviting an `invited` or
+    `pending` person keeps their status and refreshes the names and
+    `invitedAt`.
   </Step>
   <Step title="Register">
     The invitee opens the link and either types the invited email
     (case-insensitive match) or uses **Sign up with Google**, in which case the
     verified Google email has to match. If it doesn't match, the server returns
     422 and **the invite is not consumed**, so a typo doesn't cost anything. On
-    a match, the invite is consumed atomically with `GETDEL`, and the account is
-    saved as `pending` **with a 24-hour TTL**. If it isn't confirmed in time,
-    the record expires and the person needs a new invite.
+    a match, the invite is consumed atomically with `GETDEL`, and the record
+    becomes `pending`, carrying the invite's names and inviter. It has **no
+    TTL**: a pending account waits indefinitely for confirmation.
   </Step>
   <Step title="Confirm email">
     The server stores `verify:<sha256(token)>` (**24 hours**) and emails
     `/verify?token=…`. The **Confirm your email** screen explains the steps and
-    has a **Resend** button. The app stays locked until the link is used. This
-    applies to Google sign-ups too: a pending account can't sign in by any
-    method.
+    has a **Resend** button. The link expires after 24 hours, but the account
+    doesn't, so Resend issues a fresh link at any time. The app stays locked
+    until a link is used. This applies to Google sign-ups too: a pending
+    account can't sign in by any method.
   </Step>
   <Step title="Active">
-    Redeeming the confirmation link sets `status: active` and `verifiedAt`,
-    saves the record **without a TTL** (permanent), and starts a session right
-    away. Only `pending` accounts are activated. Any other non-active status
-    (for example `disabled`) returns 410, so an old confirmation link can't
-    bring back a revoked account.
+    Redeeming the confirmation link sets `status: active` and `acceptedAt`, and
+    starts a session right away. Only `pending` accounts are activated. Any
+    other non-active status (for example `disabled`) returns 410, so an old
+    confirmation link can't bring back a revoked account.
+  </Step>
+  <Step title="Profile check">
+    Every session payload carries `needsProfile`, true until the record has a
+    `profileConfirmedAt`. While it is true, the app shows only the **Profile**
+    screen ("Welcome! Please check your details"), prefilled with the invite's
+    names. Saving through `profile` sets `profileConfirmedAt`. Accounts created
+    before this field existed see the screen once on their next sign-in.
   </Step>
 </Steps>
 
@@ -70,13 +90,13 @@ request, not stored on the account.
   <Card title="Google" icon="google">
     `POST login { googleCredential }` verifies the Google ID token and signs in
     if `canSignIn(email)` passes. That means `active` accounts, plus inviters
-    who have no record yet (bootstrap). Anyone else gets 403.
+    who have no record yet or only an `invited` one (bootstrap). Anyone else gets 403.
   </Card>
 </CardGroup>
 
 ### Links from emails need a click
 
-`/verify` and `/login` pages (`ConfirmToken.jsx`) spend their token **only when
+`/verify`, `/login`, `/email-change`, and `/email-change-verify` pages (`ConfirmToken.jsx`) spend their token **only when
 the button is clicked**, never on page load. Email security scanners
 (Outlook Safe Links, for example) fetch links before the recipient sees them.
 If the page spent the token on load, the scanner would use it up first.
@@ -91,7 +111,7 @@ As soon as `App.jsx` reads a token from the URL, it calls
 
 ### Tokens
 
-All tokens (invite, verify, login, session) are 32 random bytes, base64url.
+All tokens (invite, verify, login, email change, session) are 32 random bytes, base64url.
 Redis stores only the **SHA-256 hash**. Someone who reads the Redis database
 gets no token they can use. Every one-time token is redeemed with `GETDEL`, so
 two concurrent redemptions can't both succeed.
@@ -111,19 +131,22 @@ two concurrent redemptions can't both succeed.
 </ResponseField>
 
 These requests count as activity: `GET session`, `create-task`, `chat`,
-`attach-task`, and `create-invite`.
+`attach-task`, `create-invite`, `profile`, `change-email`, and `list-users`.
 
 The TTL lives on the server, so protected functions don't send a `Set-Cookie`
 on every response. `getSession()` also reads `user:<email>` on **every**
-request and accepts the session only if `status` is `active`. If you set a
+request and accepts the session only if `status` is `active`. Otherwise it
+deletes the `sess:` key, so the session can't revive if the record comes back
+(for example, the address is re-invited after an email change). If you set a
 user's `status` to `"disabled"`, or delete their key, in Upstash, their access
 ends on their next request. See
 [Inviting users](/operations/inviting-users#revoking-access).
 
 ### When a session ends mid-request
 
-`create-task`, `chat`, `attach-task`, and `create-invite` return **401** without
-a valid session. They used to return 403. When the app gets a 401:
+Protected functions (`create-task`, `chat`, `attach-task`, `create-invite`,
+`profile`, `list-users`, and the request half of `change-email`) return
+**401** without a valid session. They used to return 403. When the app gets a 401:
 
 - It drops to the sign-in screen with the notice *"Your session expired after 30
   minutes of inactivity. Sign in again, then resubmit — your request is still
@@ -144,16 +167,37 @@ All auth state is in Upstash Redis:
 
 | Key | Value | TTL |
 |---|---|---|
-| `user:<email>` | `{ email, status: "pending" \| "active" \| "disabled", provider: "email" \| "google", invitedBy, createdAt, verifiedAt }` | 24 h while `pending`, none once `active` |
-| `invite:<sha256>` | `{ email, invitedBy, createdAt }` | 48 h |
+| `user:<email>` | See below | none |
+| `invite:<sha256>` | `{ email, firstName, lastName, invitedBy, invitedByName, createdAt }` | 48 h |
 | `verify:<sha256>` | `{ email }` | 24 h |
 | `login:<sha256>` | `{ email }` | 15 min |
+| `emailchange:<sha256>` | `{ oldEmail, newEmail, createdAt, stage: "approve" \| "verify" }` | 1 h |
+| `lock:emailchange:<email>` | `1` — one email-change move per account at a time | 30 s |
 | `sess:<sha256>` | `{ email }` | 30 min, sliding |
+
+The `user:<email>` record:
+
+| Field | Meaning |
+|---|---|
+| `email` | Normalized address, same as the key |
+| `firstName`, `lastName` | From the invite; editable under **Profile** |
+| `status` | `invited` \| `pending` \| `active` \| `disabled` |
+| `provider` | `email` \| `google` — how they registered |
+| `invitedBy`, `invitedByName` | Inviter's email and display name |
+| `invitedAt` | Latest invite time (refreshed by a re-invite) |
+| `acceptedAt` | When the email was confirmed. Older records have `verifiedAt` instead; `list-users` reads either |
+| `lastLoginAt`, `lastLoginMethod` | Latest sign-in and `email` \| `google`. Not recorded before this release |
+| `profileConfirmedAt` | When they saved the Profile screen. Unset means `needsProfile` |
+| `createdAt` | When the record was first written |
+
+A record moved by an email change also carries `previousEmail` and
+`emailChangedAt`.
 
 Values are JSON objects rather than bare strings. `@upstash/redis` runs
 `JSON.parse` on every read, so a bare string that happens to look like JSON
 could come back changed. `disabled` isn't set by any code path. It's the status
-an operator sets by hand to revoke someone.
+an operator sets by hand to revoke someone. `list-users` finds every record
+with a Redis `SCAN` over `user:*`, which is fine at tens of accounts.
 
 Emails are normalized (trimmed, lowercased) before they are used in a key. They
 have to be a **bare address** (`name@domain.tld`). Display names, angle
@@ -168,6 +212,76 @@ recipient.
   two behave differently because a misconfigured deploy should lock people out,
   not let everyone in.
 </Warning>
+
+## Changing a sign-in email
+
+Members who registered with email (not Google) can move their account to a
+new address from **Profile**. It takes **two** one-time links, one to each
+inbox, and the account moves only after both. The flow is in
+`change-email.js`:
+
+<Steps>
+  <Step title="Request (signed in)">
+    `POST change-email { newEmail }`. `canChangeEmail(user)` must pass: not an
+    `INVITER_EMAILS` address, `provider` isn't `google`, and the last sign-in
+    wasn't via Google. Otherwise 403. The new address must be valid, different,
+    not used by **any** `user:` record (any status), and not in
+    `INVITER_EMAILS`, otherwise 409. The server stores
+    `emailchange:<sha256(token)>` →
+    `{ oldEmail, newEmail, createdAt, stage: "approve" }` for **1 hour** and
+    emails an approval link, `/email-change?token=…`, to the **current**
+    address. Limited to 5 requests per hour.
+  </Step>
+  <Step title="Approve (from the old inbox)">
+    The link opens `ConfirmToken` with a **Yes, I requested this** button.
+    `POST change-email { token }` consumes the token with `GETDEL` and
+    re-checks everything (below). Approving does **not** move the account: it
+    issues a second token, `{ …, stage: "verify" }` (1 hour), and emails
+    `/email-change-verify?token=…` to the **new** address. Response:
+    `{ approved: true, sentTo }`, and the page says to check the new inbox.
+  </Step>
+  <Step title="Verify (from the new inbox)">
+    That page has a **Confirm this address** button, posting the second token
+    to the same endpoint. After the same re-checks, the server takes a 30-second
+    `lock:emailchange:<old>` (`SET NX`), writes `user:<new>` with `SET NX`,
+    deletes `user:<old>`, and signs the person in as the new address.
+  </Step>
+</Steps>
+
+Both redemptions share a limit of 10 per minute and need no session, so the
+links work in any browser. On every redemption the server re-checks that the
+old account is still `active` and eligible, that its `createdAt` matches the
+one stored in the token, and that the new address is still free.
+
+Why it's built this way:
+
+- **The old inbox approves.** The person who controls the account's current
+  inbox has to agree to the move. A stolen session alone can't redirect the
+  account, because the attacker can't read the approval email.
+- **The new inbox proves ownership.** Without the second link, someone could
+  move their account onto an address they don't own, such as a future
+  deacon's, and squat on it. It also catches typos before they lock someone
+  out.
+- **Tokens are bound to the account, not just the address.** Each token
+  carries the record's `createdAt`. If the old address is deleted and
+  re-created for someone else, a leftover link no longer matches and returns
+  410.
+- **No clones, no overwrites.** The per-account lock means two links
+  redeemed at once can't both copy the account. The `NX` write means that if
+  someone claims the new address in the meantime, the move fails with 409
+  instead of overwriting their record.
+- **Inviter addresses are blocked as targets.** Invite rights come from the
+  address listed in `INVITER_EMAILS`, so moving an account onto one would be
+  privilege escalation. Inviters themselves can't change their address either:
+  it's configuration, and the UI says so.
+- **Old sessions end for good.** Sessions store the email, and `getSession`
+  requires a live, `active` `user:` record for it. When it doesn't find one,
+  it **deletes** the session rather than just refusing it. An old address's
+  sessions can't come back to life if that address is later re-created.
+  `updateUser` writes with `XX`, so a late write (a login stamp, say) can't
+  resurrect a moved or deleted record either.
+- **Google accounts are excluded.** Their email belongs to Google; signing in
+  with Google always uses the Google address.
 
 ## Google verification
 
@@ -199,7 +313,8 @@ There are two layers:
 1. **`SameSite=Strict`**. The browser doesn't attach the cookie to requests
    that come from another site.
 2. **`Content-Type: application/json` is required** on every `POST` function:
-   the auth functions, `create-task`, `chat`, and `attach-task`
+   the auth functions, `profile`, `change-email`, `create-task`, `chat`, and
+   `attach-task`
    (`requireJsonContentType` returns 415 otherwise). A cross-origin request
    with a JSON body triggers a CORS preflight, which a plain HTML form post
    can't pass.
@@ -231,19 +346,29 @@ There are two layers:
     padding, the extra Redis write and Resend call for a real account would
     make it measurably slower.
   </Accordion>
-  <Accordion title="Stops: filing a task under someone else's email">
-    `create-task` takes the submitter email from the **session** and ignores
-    any `submitterEmail` in the body. The task's "Submitted by" line always
-    shows the signed-in account's email.
+  <Accordion title="Stops: filing a task under someone else's name or email">
+    `create-task` takes the submitter email from the **session** and the name
+    from that account's record (`displayName(user)`), and ignores any
+    `submitterName` or `submitterEmail` in the body. The task's "Submitted by"
+    line always shows the signed-in account.
+  </Accordion>
+  <Accordion title="Stops: a stolen session taking over the account">
+    Changing the sign-in email needs a click on a link sent to the **current**
+    address, so a session alone isn't enough to move the account elsewhere.
+  </Accordion>
+  <Accordion title="Stops: claiming an address you don't own">
+    The move finishes only from a link sent to the **new** address, so nobody
+    can park their account on someone else's email.
   </Accordion>
   <Accordion title="Does not stop: someone with access to a member's inbox">
     Anyone who can read a member's email can request a sign-in link for them.
     This is the usual passwordless tradeoff. Revoke access by setting the
     user's `status` to `"disabled"`.
   </Accordion>
-  <Accordion title="Does not fully tie 'Your Name' to the account">
-    The submitter **name** and follower still come from the form's dropdown,
-    validated only against the roster GIDs. The email comes from the session.
+  <Accordion title="Does not verify the name itself">
+    First and last names are whatever the inviter typed and the member
+    confirmed on the Profile screen. They're sanitized (control characters
+    stripped, 50 characters max) but not checked against the roster.
   </Accordion>
 </AccordionGroup>
 
@@ -254,16 +379,22 @@ sends the cookie automatically.
 
 | Export | Calls |
 |---|---|
-| `getSession()` | `GET session` → `{ authenticated, email?, canInvite? }` |
+| `getSession()` | `GET session` → `{ authenticated, email?, name?, firstName?, lastName?, canInvite?, canChangeEmail?, needsProfile? }` |
 | `requestLoginLink(email)` / `redeemLoginLink(token)` / `signInWithGoogle(cred)` | `login` |
 | `registerWithEmail(invite, email)` / `registerWithGoogle(invite, cred)` | `register` |
 | `confirmEmail(token)` / `resendConfirmation(email)` | `verify-email` |
-| `createInvite(email, sendEmail)` | `create-invite` |
+| `createInvite({ email, firstName, lastName, sendEmail })` | `create-invite` |
+| `listUsers()` | `GET list-users` |
+| `saveProfile(firstName, lastName)` | `profile` |
+| `requestEmailChange(newEmail)` / `confirmEmailChange(token)` (both links) | `change-email` |
 | `logout()` | `logout` |
 | `ApiError` | `Error` with `.status`, so callers can detect 401 |
-| `parseAuthRoute()` | Reads `/invite`, `/verify`, `/login` + `?token=` from the URL |
+| `parseAuthRoute()` | Reads `/invite`, `/verify`, `/login`, `/email-change`, `/email-change-verify` + `?token=` from the URL |
 
 `App.jsx` holds `session` state: `undefined` while the initial check runs,
-`null` when signed out, otherwise `{ email, canInvite }`. Screens:
-`SignIn`, `Register` (→ `CheckEmail`), `ConfirmToken`, and `InvitePanel`,
+`null` when signed out, otherwise the session payload
+`{ email, name, firstName, lastName, canInvite, canChangeEmail, needsProfile }`.
+When `needsProfile` is true, `Profile` is the only screen. The header shows
+`name` (with the email on hover). Screens: `SignIn`, `Register`
+(→ `CheckEmail`), `ConfirmToken`, `Profile`, `InvitePanel`, and `UsersTray`,
 sharing `AuthLayout` and `GoogleButton`.

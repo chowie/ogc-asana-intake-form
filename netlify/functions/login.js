@@ -1,6 +1,6 @@
 import { getRedis } from './_shared/redis.js'
-import { createSession } from './_shared/session.js'
-import { canSignIn, isInviter, isValidEmail, normalizeEmail } from './_shared/users.js'
+import { signedInResponse } from './_shared/session.js'
+import { canSignIn, isValidEmail, normalizeEmail } from './_shared/users.js'
 import { hashToken, isTokenShape, newToken } from './_shared/tokens.js'
 import { loginEmail, sendEmail } from './_shared/email.js'
 import { verifyGoogleIdToken } from './_shared/google.js'
@@ -9,11 +9,6 @@ import { limit } from './_shared/rate-limit.js'
 import { padTo, RESPONSE_FLOOR_MS } from './_shared/timing.js'
 
 export const LOGIN_TTL_SEC = 15 * 60
-
-async function startSession(email) {
-  const setCookie = await createSession(email)
-  return json(200, { authenticated: true, email, canInvite: isInviter(email) }, { 'Set-Cookie': setCookie })
-}
 
 // POST { email }            — email a one-time sign-in link
 // POST { loginToken }       — redeem a sign-in link
@@ -30,7 +25,7 @@ export async function handler(event) {
       if (!isTokenShape(body.loginToken)) return gone
       const email = (await getRedis().getdel(`login:${hashToken(body.loginToken)}`))?.email
       if (!email || !(await canSignIn(email))) return gone
-      return await startSession(email)
+      return await signedInResponse(email, 'email')
     }
 
     if (body.googleCredential !== undefined) {
@@ -41,7 +36,7 @@ export async function handler(event) {
       if (!(await canSignIn(email))) {
         return json(403, { error: 'No active account uses that Google email. Ask a deacon for an invite, or confirm your email first.' })
       }
-      return await startSession(email)
+      return await signedInResponse(email, 'google')
     }
 
     const limited = await limit(event, { id: 'login-request', max: 5, windowSec: 600 })

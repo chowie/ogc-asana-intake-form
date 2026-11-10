@@ -11,7 +11,6 @@ const TEST_STAFF = vi.hoisted(() => [
 
 vi.mock('../config/staff.js', () => ({
   STAFF: TEST_STAFF,
-  findStaff: (name) => TEST_STAFF.find((s) => s.name === name) ?? null,
 }))
 
 function renderForm(props = {}) {
@@ -20,8 +19,7 @@ function renderForm(props = {}) {
   return { onSubmit }
 }
 
-async function fillRequiredFields(name = 'Test User One', title = 'Test Request', details = 'Some details here') {
-  await userEvent.selectOptions(screen.getByLabelText(/your name/i), name)
+async function fillRequiredFields(title = 'Test Request', details = 'Some details here') {
   await userEvent.clear(screen.getByLabelText(/request title/i))
   await userEvent.type(screen.getByLabelText(/request title/i), title)
   await userEvent.clear(screen.getByLabelText(/request details/i))
@@ -30,39 +28,25 @@ async function fillRequiredFields(name = 'Test User One', title = 'Test Request'
 
 beforeEach(() => {
   vi.clearAllMocks()
-  localStorage.clear()
 })
 
-describe('IntakeForm — account email (read-only)', () => {
-  it('shows the signed-in email, read-only', () => {
-    renderForm({ accountEmail: 'me@example.com' })
-    const input = screen.getByLabelText(/your email/i)
-    expect(input).toHaveValue('me@example.com')
-    expect(input).toHaveAttribute('readonly')
+describe('IntakeForm — submitter comes from the account (hidden)', () => {
+  it('shows no name picker and no email field', () => {
+    renderForm({ accountName: 'Mary Member', accountEmail: 'me@example.com' })
+    expect(screen.queryByLabelText(/your name/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/your email/i)).not.toBeInTheDocument()
+    expect(screen.queryByDisplayValue('me@example.com')).not.toBeVisible()
   })
 
-  it('does not change when a different name is selected', async () => {
-    renderForm({ accountEmail: 'me@example.com' })
-    await userEvent.selectOptions(screen.getByLabelText(/your name/i), 'Test User Two')
-    expect(screen.getByLabelText(/your email/i)).toHaveValue('me@example.com')
+  it('carries the name and email in hidden fields', () => {
+    renderForm({ accountName: 'Mary Member', accountEmail: 'me@example.com' })
+    expect(document.querySelector('input[type="hidden"][name="submitterName"]')).toHaveValue('Mary Member')
+    expect(document.querySelector('input[type="hidden"][name="submitterEmail"]')).toHaveValue('me@example.com')
   })
 
-  it('cannot be typed into', async () => {
-    renderForm({ accountEmail: 'me@example.com' })
-    const input = screen.getByLabelText(/your email/i)
-    await userEvent.type(input, 'spoof')
-    expect(input).toHaveValue('me@example.com')
-  })
-
-  it('pre-selects the roster name matching the account email on first visit', () => {
-    renderForm({ accountEmail: 'Three@Example.com' })
-    expect(screen.getByLabelText(/your name/i)).toHaveValue('Test User Three')
-  })
-
-  it('a remembered name wins over the account-email match', () => {
-    localStorage.setItem('ogc_last_submitter', JSON.stringify({ name: 'Test User Two' }))
-    renderForm({ accountEmail: 'three@example.com' })
-    expect(screen.getByLabelText(/your name/i)).toHaveValue('Test User Two')
+  it('falls back to the email when the account has no name', () => {
+    renderForm({ accountName: '', accountEmail: 'me@example.com' })
+    expect(document.querySelector('input[name="submitterName"]')).toHaveValue('me@example.com')
   })
 })
 
@@ -71,39 +55,38 @@ describe('IntakeForm — validation', () => {
     const { onSubmit } = renderForm()
     await userEvent.click(screen.getByRole('button', { name: /submit request/i }))
     expect(onSubmit).not.toHaveBeenCalled()
-    expect(screen.getByText(/please select your name/i)).toBeInTheDocument()
     expect(screen.getByText(/request title is required/i)).toBeInTheDocument()
     expect(screen.getByText(/request details are required/i)).toBeInTheDocument()
   })
 
-  it('blocks submission when only name is filled', async () => {
+  it('blocks submission when only the title is filled', async () => {
     const { onSubmit } = renderForm()
-    await userEvent.selectOptions(screen.getByLabelText(/your name/i), 'Test User One')
+    await userEvent.type(screen.getByLabelText(/request title/i), 'Just a title')
     await userEvent.click(screen.getByRole('button', { name: /submit request/i }))
     expect(onSubmit).not.toHaveBeenCalled()
   })
 })
 
 describe('IntakeForm — onSubmit payload', () => {
-  it('calls onSubmit with correct payload including followerGid', async () => {
-    const { onSubmit } = renderForm({ accountEmail: 'me@example.com' })
-    await fillRequiredFields('Test User One', 'Fix the heater', 'The fellowship hall heater is broken.')
+  it('calls onSubmit with the account name/email and no follower', async () => {
+    const { onSubmit } = renderForm({ accountName: 'Mary Member', accountEmail: 'me@example.com' })
+    await fillRequiredFields('Fix the heater', 'The fellowship hall heater is broken.')
     await userEvent.type(screen.getByLabelText(/due date/i), '2026-06-01')
     await userEvent.click(screen.getByRole('button', { name: /submit request/i }))
 
     expect(onSubmit).toHaveBeenCalledOnce()
     const [args] = onSubmit.mock.calls[0]
-    expect(args.submitterName).toBe('Test User One')
-    expect(args.submitterEmail).toBe('me@example.com') // from the session, not the roster
+    expect(args.submitterName).toBe('Mary Member')
+    expect(args.submitterEmail).toBe('me@example.com')
     expect(args.title).toBe('Fix the heater')
     expect(args.details).toBe('The fellowship hall heater is broken.')
     expect(args.dueDate).toBe('2026-06-01')
-    expect(args.followerGid).toBe('0000000000000001')
+    expect(args).not.toHaveProperty('followerGid')
   })
 
   it('sends null dueDate when not provided', async () => {
     const { onSubmit } = renderForm()
-    await fillRequiredFields('Test User Two', 'Budget review', 'Need to review Q3 budget.')
+    await fillRequiredFields('Budget review', 'Need to review Q3 budget.')
     await userEvent.click(screen.getByRole('button', { name: /submit request/i }))
 
     expect(onSubmit).toHaveBeenCalledOnce()
@@ -116,7 +99,7 @@ describe('IntakeForm — frozen prop', () => {
   it('disables all inputs and button when frozen=true', () => {
     renderForm({ frozen: true })
     expect(screen.getByRole('button', { name: /submit request/i })).toBeDisabled()
-    expect(screen.getByLabelText(/your name/i)).toBeDisabled()
+    expect(screen.getByLabelText(/assign to/i)).toBeDisabled()
     expect(screen.getByLabelText(/request title/i)).toBeDisabled()
     expect(screen.getByLabelText(/request details/i)).toBeDisabled()
   })
@@ -140,21 +123,6 @@ describe('IntakeForm — apiError prop', () => {
   it('shows no error banner when apiError is null', () => {
     renderForm({ apiError: null })
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-  })
-})
-
-describe('IntakeForm — name/email persistence', () => {
-  it('saves only the name to localStorage when a name is selected', async () => {
-    renderForm()
-    await userEvent.selectOptions(screen.getByLabelText(/your name/i), 'Test User One')
-    const stored = JSON.parse(localStorage.getItem('ogc_last_submitter'))
-    expect(stored).toEqual({ name: 'Test User One' })
-  })
-
-  it('pre-populates the name from localStorage on mount', () => {
-    localStorage.setItem('ogc_last_submitter', JSON.stringify({ name: 'Test User Two', email: 'two@example.com' }))
-    renderForm()
-    expect(screen.getByLabelText(/your name/i)).toHaveValue('Test User Two')
   })
 })
 
@@ -201,17 +169,11 @@ describe('IntakeForm — file attachment', () => {
   })
 })
 
-describe('IntakeForm — assignee self-assignment prevention', () => {
-  it('resets assignee when the submitter selects themselves as the assignee', async () => {
-    renderForm()
-    // Pick a submitter, then assign the task to Test User Two.
-    await userEvent.selectOptions(screen.getByLabelText(/your name/i), 'Test User One')
-    await userEvent.selectOptions(screen.getByLabelText(/assign to/i), '0000000000000002')
-    expect(screen.getByLabelText(/assign to/i)).toHaveValue('0000000000000002')
-
-    // Now change the submitter to Test User Two — the assignee (now themselves) clears.
-    await userEvent.selectOptions(screen.getByLabelText(/your name/i), 'Test User Two')
-    expect(screen.getByLabelText(/assign to/i)).toHaveValue('')
+describe('IntakeForm — assignee', () => {
+  it('lists the whole roster', () => {
+    renderForm({ accountName: 'Test User One', accountEmail: 'one@example.com' })
+    const options = [...screen.getByLabelText(/assign to/i).querySelectorAll('option')].map((o) => o.textContent)
+    expect(options).toEqual(['— Unassigned —', 'Test User One', 'Test User Two', 'Test User Three'])
   })
 })
 
@@ -226,7 +188,6 @@ describe('IntakeForm — initialData prop', () => {
         dueDate: '2026-07-01',
       },
     })
-    expect(screen.getByLabelText(/your name/i)).toHaveValue('Test User Two')
     expect(screen.getByLabelText(/request title/i)).toHaveValue('Pre-filled title')
     expect(screen.getByLabelText(/request details/i)).toHaveValue('Pre-filled details')
   })

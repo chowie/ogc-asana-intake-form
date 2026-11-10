@@ -13,25 +13,48 @@ There are two groups:
   session and return **401** without one. They reject non-`POST` with 405, a
   non-JSON `Content-Type` with 415 (the CSRF guard), and malformed JSON with
   400.
-- **Accounts:** `session`, `login`, `register`, `verify-email`,
-  `create-invite`, `logout`. Every one except `session` (a `GET`) is a `POST`
-  with the same 405/415/400 checks. Auth **fails closed** without Redis:
+- **Accounts:** `session`, `login`, `register`, `verify-email`, `profile`,
+  `change-email`, `create-invite`, `list-users`, `logout`. Every one except
+  `session` and `list-users` (both `GET`) is a `POST` with the same 405/415/400
+  checks. Auth **fails closed** without Redis:
   `login`, `register`, and `verify-email` return 503, `session` reports
   signed out, and anything behind `requireSession` returns 401.
 
 Every session check (`requireSession` / `getSession`) slides the 30-minute
 session TTL. See [Authentication](/architecture/authentication).
 
+### The session payload
+
+`session`, the sign-in modes of `login`, `verify-email { token }`, `profile`,
+and `change-email { token }` all return the same shape, built by
+`sessionPayload(user)` in `_shared/users.js`:
+
+```json
+{
+  "authenticated": true,
+  "email": "you@example.com",
+  "name": "Jane Doe",
+  "firstName": "Jane",
+  "lastName": "Doe",
+  "canInvite": false,
+  "canChangeEmail": true,
+  "needsProfile": false
+}
+```
+
+`name` is "First Last", or the email when the record has no name.
+`canChangeEmail` is false for inviters and Google accounts. `needsProfile` is
+true until the person saves the Profile screen. Every sign-in also records
+`lastLoginAt` and `lastLoginMethod` (`email` or `google`) on the user record
+(`signedInResponse` in `_shared/session.js`).
+
 ## session
 
 `GET`. Tells the client who is signed in. The `HttpOnly` cookie is invisible to
 JS. It counts as activity.
 
-```json Response 200
-{ "authenticated": true, "email": "you@example.com", "canInvite": false }
-```
-
-Signed out (or Redis down): `{ "authenticated": false }`, still 200.
+Response 200 is the [session payload](#the-session-payload). Signed out, no
+user record, or Redis down: `{ "authenticated": false }`, still 200.
 
 ## login
 
@@ -54,12 +77,14 @@ One endpoint with three modes, chosen by which field is in the body:
 | Mode | Success | Errors |
 |---|---|---|
 | `email` | 200 `{ sent: true }`, **always**, account or not, padded to a 1 s minimum. The link is emailed only if `canSignIn` passes | 422 invalid email · 429 over 5 / 10 min |
-| `loginToken` | 200 `{ authenticated, email, canInvite }` + `Set-Cookie` | 410 expired/used/malformed · 429 over 10 / min |
+| `loginToken` | 200 session payload + `Set-Cookie` | 410 expired/used/malformed · 429 over 10 / min |
 | `googleCredential` | 200 same as above + `Set-Cookie` | 401 unverifiable token · 403 no active account · 429 over 10 / min |
 
 `canSignIn(email)` passes for `active` accounts. An `INVITER_EMAILS` address
-with **no record at all** is provisioned `active` on the spot. A record with
-any other status (`pending`, `disabled`) fails, even for an inviter. If
+with **no record at all** is provisioned `active` on the spot, and one with an
+`invited` record (it was also sent an invite) is activated, keeping the
+invite's names. Any other status (`pending`, `disabled`, or `invited` for a
+non-inviter) fails. If
 the email fails to send, the error is logged and the response is still
 `{ sent: true }`.
 
@@ -81,8 +106,9 @@ the email fails to send, the error is logged and the response is still
 
 | Code | When |
 |---|---|
-| 200 | Invite consumed, user saved as `pending` with a 24 h TTL, confirmation emailed (`emailSent: false` if Resend failed) |
+| 200 | Invite consumed, record set to `pending` (no TTL) with the invite's names and inviter, confirmation emailed (`emailSent: false` if Resend failed) |
 | 401 | Google credential couldn't be verified |
+| 403 | The record is `disabled` |
 | 409 | That email already has an `active` account |
 | 410 | Invite token malformed, expired, or already used |
 | 422 | Invalid email (must be a bare address), or email/Google email doesn't match the invite (**invite not consumed**) |
@@ -106,15 +132,57 @@ succeeds.
 
 | Mode | Success | Errors |
 |---|---|---|
-| `token` | 200 `{ authenticated, email, canInvite }` + `Set-Cookie`. A `pending` account becomes `active` (with `verifiedAt`, and the TTL removed). An already-active account just gets a session | 410 expired/used, account gone, or any other status such as `disabled` · 429 over 10 / min |
-| `resend` | 200 `{ ok: true }` **always**, padded to a 1 s minimum. A new link is sent only if the account is `pending` | 429 over 3 / 10 min |
+| `token` | 200 session payload + `Set-Cookie`. A `pending` account becomes `active` (with `acceptedAt`). An already-active account just gets a session | 410 expired/used, account gone, or any other status such as `disabled` · 429 over 10 / min |
+| `resend` | 200 `{ ok: true }` **always**, padded to a 1 s minimum. A new link is sent only if the account is `pending`. Pending accounts don't expire, so this works at any time | 429 over 3 / 10 min |
+
+## profile
+
+Requires a session. The signed-in user saves their name: first-sign-in
+onboarding, or later from the **Profile** header link.
+
+```json Request
+{ "firstName": "Jane", "lastName": "Doe" }
+```
+
+| Code | When |
+|---|---|
+| 200 | Saved `firstName`, `lastName`, and `profileConfirmedAt`. Returns the session payload (`needsProfile: false`) |
+| 401 | No live session, or the record is gone |
+| 422 | First or last name empty after sanitizing (control characters stripped, whitespace collapsed, 50 characters max) |
+| 429 | Over 20 requests / 10 min from this IP |
+| 503 | Redis error |
+
+## change-email
+
+Two modes, chosen by the body. A change takes two emailed links: an
+approval link to the current address, then a verify link to the new one. See
+[Changing a sign-in email](/architecture/authentication#changing-a-sign-in-email)
+for the reasoning.
+
+<CodeGroup>
+```json Request a change (signed in)
+{ "newEmail": "jane.new@example.com" }
+```
+
+```json Redeem a link (approve or verify)
+{ "token": "<from /email-change?token= or /email-change-verify?token=>" }
+```
+</CodeGroup>
+
+| Mode | Success | Errors |
+|---|---|---|
+| `newEmail` | 200 `{ sent: true, to: "<current email>" }`. Stores `emailchange:<hash>` (`stage: "approve"`, bound to the record's `createdAt`) for 1 h and emails the approval link to the **current** address | 401 no session · 403 inviter or Google account · 409 address in use by any account or listed in `INVITER_EMAILS` · 422 invalid or unchanged · 429 over 5 / hour · 502 email failed to send |
+| `token`, stage `approve` | 200 `{ approved: true, sentTo: "<new email>" }`. Nothing moves yet: a `stage: "verify"` token (1 h) is stored and `/email-change-verify?token=…` is emailed to the **new** address | 410 expired/used/malformed, account no longer active and eligible, or `createdAt` mismatch (address re-created) · 409 address claimed in the meantime · 429 over 10 / min · 502 couldn't email the new address (start again) |
+| `token`, stage `verify` | 200 session payload for the **new** address + `Set-Cookie`. Under a 30 s `lock:emailchange:<old>`, the record moves to `user:<new>` (`SET NX`) and `user:<old>` is deleted, ending every old session | Same 410 / 409 / 429 as above, plus 410 if another move for the account holds the lock |
+
+Both modes return 503 on a Redis error.
 
 ## create-invite
 
 Requires a session **and** an inviter email.
 
 ```json Request
-{ "email": "new@example.com", "sendEmail": true }
+{ "firstName": "Jane", "lastName": "Doe", "email": "new@example.com", "sendEmail": true }
 ```
 
 ```json Response 200
@@ -123,15 +191,48 @@ Requires a session **and** an inviter email.
 
 | Code | When |
 |---|---|
-| 200 | Invite stored for 48 h. `emailSent` is false if `sendEmail: false` or Resend failed. The link is returned either way |
+| 200 | Invite stored for 48 h and `user:<email>` saved with status `invited` (no TTL). `emailSent` is false if `sendEmail: false` or Resend failed. The link is returned either way |
 | 401 | No live session |
 | 403 | Signed in, but not in `INVITER_EMAILS` |
-| 409 | That email already has an `active` account |
-| 422 | Invalid email |
+| 409 | That email already has an `active` account, the account is `disabled`, or an account was created for it at the same moment (a new record is written with `SET NX`) |
+| 422 | First or last name missing, or invalid email |
 | 429 | Over 20 invites/hour from this IP |
 
-Inviting a `pending` user is allowed. Use it to re-invite someone whose
-confirmation lapsed.
+Re-inviting an `invited` or `pending` user is allowed. It keeps their status
+and refreshes `firstName`, `lastName`, `invitedBy`, `invitedByName`, and
+`invitedAt`. The invite email greets them by first name, and its subject and
+body name the inviter as "Name (email)".
+
+## list-users
+
+`GET`. Requires a session **and** an inviter email. Feeds the **Users** tray.
+
+```json Response 200
+{
+  "users": [
+    {
+      "email": "jane@example.com", "name": "Jane Doe", "status": "active",
+      "invitedBy": "Chris Howie", "invitedAt": 1754000000000,
+      "acceptedAt": 1754003600000, "lastLoginAt": 1754100000000
+    }
+  ]
+}
+```
+
+Every `user:*` record of any status, found with Redis `SCAN` and sorted by
+name. `invitedBy` is the inviter's display name (falling back to their email).
+`acceptedAt` falls back to the older `verifiedAt` field. Missing timestamps are
+`null`: `invitedAt` for bootstrapped inviters, `acceptedAt` before
+confirmation, `lastLoginAt` for anyone who hasn't signed in since logins
+started being recorded.
+
+| Code | When |
+|---|---|
+| 200 | The list |
+| 401 | No live session |
+| 403 | Signed in, but not in `INVITER_EMAILS` |
+| 405 | Not a `GET` |
+| 503 | Redis error |
 
 ## logout
 
@@ -202,35 +303,51 @@ this.
 ```json Request
 {
   "title": "...", "details": "...", "dueDate": "2026-08-01",
-  "submitterName": "...",
-  "followerGid": "...", "assigneeGid": null,
+  "assigneeGid": null,
   "summary": { "what": "...", "...": "..." }
 }
 ```
 
+The client also sends `submitterName` and `submitterEmail`; the server ignores
+both.
+
 | Code | When |
 |---|---|
-| 200 | Task created — returns the Asana payload with `name` and `permalink_url` |
+| 200 | Task created — returns the Asana payload (`data.name`, `data.permalink_url`) plus `emailSent` |
 | 401 | No live session |
 | 415 | `Content-Type` isn't `application/json` |
-| 422 | Missing required fields, or a `followerGid`/`assigneeGid` not in the roster |
+| 422 | Missing `title`, missing both `details` and a complete summary, or an `assigneeGid` not in the roster |
+| 429 | Over 30 tasks/hour from this IP (each one sends a receipt email) |
 | 502 | Asana unreachable |
 | 504 | Asana exceeded the 8-second timeout |
 | *pass-through* | Asana's own status on an API error |
 
-Three validations worth noting:
+Things worth noting:
 
-**Attribution from the session.** The "Submitted by" line uses the session's
-email. Any `submitterEmail` in the body is ignored, so a caller can't file a task
-under someone else's address.
+**Attribution from the session.** The "Submitted by" line is
+`displayName(user)` and the session's email, both looked up from the signed-in
+account. Any `submitterName` or `submitterEmail` in the body is ignored, so a
+caller can't file a task under someone else's name or address. If the record
+lookup fails, the name falls back to the email.
 
 **Summary-or-details.** The task body is built from the five-field summary when
 it's complete, otherwise from raw `details`. An empty `{}` summary is rejected
 rather than producing literal `"undefined"` in the notes.
 
-**GID allowlist.** `followerGid` and `assigneeGid` are checked against
-`isValidGid()`, which is built from `data/roster.json`. Without it, a direct POST
-could add any workspace user as a follower and spam them with notifications.
+**GID allowlist.** `assigneeGid` is checked against `isValidGid()`, which is
+built from `data/roster.json`. Without it, a direct POST could assign the task
+to any workspace user and spam them with notifications.
+
+**No followers.** The task is created without `followers`. Following needs the
+submitter's own Asana account, so the success screen and the receipt email tell
+them to open the task and click **Follow** (Asana may ask them to request
+access the first time).
+
+**Best-effort receipt.** After Asana succeeds, the handler emails the submitter
+`taskCreatedEmail` (task title, link, and the follow instructions).
+`emailSent` reports whether it went out. A send failure is logged and never
+turns the response into an error, because the task already exists and an error
+would invite a duplicate resubmit.
 
 ## attach-task
 
@@ -263,10 +380,10 @@ length rather than allocating the buffer first.
 |---|---|
 | `_shared/redis.js` | `getRedis()`: the shared Upstash client, or `null` when `UPSTASH_*` is unset |
 | `_shared/tokens.js` | `newToken()` (32 random bytes, base64url), `hashToken()` (SHA-256), `isTokenShape()` |
-| `_shared/session.js` | `createSession`, `getSession`, `requireSession` (401 guard), `destroySession`. Owns the `ogc_session` cookie |
-| `_shared/users.js` | `normalizeEmail`, `isValidEmail`, `isInviter`, `getUser`, `saveUser`, `canSignIn` |
+| `_shared/session.js` | `createSession`, `signedInResponse` (session + login stamp + payload), `getSession` (deletes a session whose account is missing or not active), `requireSession` (401 guard), `destroySession`. Owns the `ogc_session` cookie |
+| `_shared/users.js` | `normalizeEmail`, `isValidEmail`, `sanitizeName`, `displayName`, `isInviter`, `canChangeEmail`, `sessionPayload`, `getUser`, `saveUser`, `updateUser` (writes with `XX`, so it never resurrects a moved or deleted record), `listUsers`, `canSignIn` |
 | `_shared/verification.js` | `sendConfirmation()`: issues a `verify:` token and emails it |
-| `_shared/email.js` | `sendEmail()` via the Resend REST API (10 s timeout), plus invite/confirm/login templates |
+| `_shared/email.js` | `sendEmail()` via the Resend REST API (10 s timeout), plus invite/confirm/login/email-change approval/new-address verify/task-receipt templates |
 | `_shared/google.js` | `verifyGoogleIdToken()`: checks the ID token against Google's JWKS with `jose` |
 | `_shared/http.js` | `json()`, `requireJsonContentType()` (415), `parseJsonPost()` (405/415/400), `appUrl()` (`APP_URL` → `URL` → localhost) |
 | `_shared/timing.js` | `padTo()` / `RESPONSE_FLOOR_MS`: minimum response time for enumeration-sensitive responses (`AUTH_RESPONSE_FLOOR_MS`, default 1000) |

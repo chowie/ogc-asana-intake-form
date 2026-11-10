@@ -3,6 +3,8 @@ import SignIn from './components/SignIn.jsx'
 import Register from './components/Register.jsx'
 import ConfirmToken from './components/ConfirmToken.jsx'
 import InvitePanel from './components/InvitePanel.jsx'
+import Profile from './components/Profile.jsx'
+import UsersTray from './components/UsersTray.jsx'
 import IntakeForm from './components/IntakeForm.jsx'
 import PhilipChat from './components/PhilipChat.jsx'
 import SuccessMessage from './components/SuccessMessage.jsx'
@@ -42,6 +44,7 @@ const INITIAL = {
   attachedFile: null,
   awaitingConfirm: false,
   attachFailed: false,
+  emailSent: false,
 }
 
 function reducer(state, action) {
@@ -88,6 +91,7 @@ function reducer(state, action) {
         taskTitle: action.taskTitle,
         taskUrl: action.taskUrl,
         attachFailed: action.attachFailed,
+        emailSent: action.emailSent,
       }
     default:
       return state
@@ -95,15 +99,18 @@ function reducer(state, action) {
 }
 
 export default function App() {
-  // undefined = still checking, null = signed out, else { email, canInvite }
+  // undefined = still checking, null = signed out,
+  // else { email, name, firstName, lastName, canInvite, canChangeEmail, needsProfile }
   const [session, setSession] = useState(undefined)
   const [route, setRoute] = useState(parseAuthRoute) // { kind: invite|verify|login, token } | null
   const [notice, setNotice] = useState(null)
   const [showInvite, setShowInvite] = useState(false)
+  const [showUsers, setShowUsers] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
   const [state, dispatch] = useReducer(reducer, INITIAL)
   const {
     stage, formData, messages, askedCount, awaitingAI, summary,
-    taskTitle, taskUrl, errorMsg, attachedFile, awaitingConfirm, attachFailed,
+    taskTitle, taskUrl, errorMsg, attachedFile, awaitingConfirm, attachFailed, emailSent,
   } = state
 
   // Refs hold the latest values for async/recursive reads, where reducer state
@@ -150,9 +157,15 @@ export default function App() {
 
   // A protected call returned 401: drop to the sign-in screen. App stays
   // mounted, so the reducer (the in-progress request) survives re-login.
+  const closePanels = () => {
+    setShowInvite(false)
+    setShowUsers(false)
+    setShowProfile(false)
+  }
+
   const expireSession = () => {
     setSession(null)
-    setShowInvite(false)
+    closePanels()
     setNotice(SESSION_EXPIRED)
   }
 
@@ -165,7 +178,7 @@ export default function App() {
   const handleSignOut = async () => {
     await logout().catch(() => {})
     setSession(null)
-    setShowInvite(false)
+    closePanels()
     setNotice(null)
     formDataRef.current = null
     askedCountRef.current = 0
@@ -294,6 +307,7 @@ export default function App() {
       taskTitle: data.data.name,
       taskUrl: data.data.permalink_url ?? '',
       attachFailed,
+      emailSent: !!data.emailSent,
     })
     confirmInFlight.current = false
   }
@@ -321,14 +335,34 @@ export default function App() {
   if (!session) {
     return <SignIn onSignedIn={handleSignedIn} notice={notice} />
   }
+  // First sign-in: review the name the invite was created with. Later: the Profile link.
+  if (session.needsProfile || showProfile) {
+    return (
+      <Profile
+        session={session}
+        onSaved={(s) => {
+          setSession(s)
+          setShowProfile(false)
+        }}
+        onCancel={() => setShowProfile(false)}
+        onSessionExpired={expireSession}
+      />
+    )
+  }
 
   const header = (
     <div className="w-full max-w-lg flex items-center justify-end gap-4 text-sm text-gray-500 mb-4">
-      <span className="truncate">{session.email}</span>
+      <span className="truncate" title={session.email}>{session.name || session.email}</span>
+      <button type="button" onClick={() => setShowProfile(true)} className="hover:underline">Profile</button>
       {session.canInvite && (
-        <button type="button" onClick={() => setShowInvite((v) => !v)} className="text-blue-600 hover:underline">
-          Invite
-        </button>
+        <>
+          <button type="button" onClick={() => setShowInvite((v) => !v)} className="text-blue-600 hover:underline">
+            Invite
+          </button>
+          <button type="button" onClick={() => setShowUsers(true)} className="text-blue-600 hover:underline">
+            Users
+          </button>
+        </>
       )}
       <button type="button" onClick={handleSignOut} className="hover:underline">Sign out</button>
     </div>
@@ -340,6 +374,7 @@ export default function App() {
         taskTitle={taskTitle}
         taskUrl={taskUrl}
         attachFailed={attachFailed}
+        emailSent={emailSent}
         onReset={handleReset}
       />
     )
@@ -353,6 +388,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center py-10 px-4">
       {header}
+      {showUsers && <UsersTray onClose={() => setShowUsers(false)} onSessionExpired={expireSession} />}
       <div className="w-full max-w-lg">
         {showInvite && <InvitePanel onClose={() => setShowInvite(false)} onSessionExpired={expireSession} />}
         <div className="text-center mb-8">
@@ -361,6 +397,7 @@ export default function App() {
         </div>
         <IntakeForm
           initialData={formData}
+          accountName={session.name}
           accountEmail={session.email}
           onSubmit={handleFormSubmit}
           onFileChange={(file) => dispatch({ type: 'SET_FILE', file })}

@@ -18,6 +18,7 @@ import { handler as verifyEmail } from '../verify-email.js'
 import { handler as login } from '../login.js'
 import { handler as session } from '../session.js'
 import { handler as logout } from '../logout.js'
+import { handler as profile } from '../profile.js'
 import { requireSession } from '../_shared/session.js'
 import { hashToken } from '../_shared/tokens.js'
 
@@ -50,7 +51,7 @@ async function signInInviter() {
 }
 
 async function invite(cookie, email = NEWBIE, extra = {}) {
-  const res = await createInvite(post({ email, ...extra }, { cookie }))
+  const res = await createInvite(post({ email, firstName: 'Nora', lastName: 'Newman', ...extra }, { cookie }))
   return { res, token: res.statusCode === 200 ? new URL(json(res).link).searchParams.get('token') : null }
 }
 
@@ -108,6 +109,45 @@ describe('create-invite', () => {
     const { res } = await invite(cookie, 'not-an-email')
     expect(res.statusCode).toBe(422)
   })
+
+  it('requires a first and last name (422)', async () => {
+    const cookie = await signInInviter()
+    expect((await invite(cookie, NEWBIE, { firstName: '' })).res.statusCode).toBe(422)
+    expect((await invite(cookie, NEWBIE, { lastName: '   ' })).res.statusCode).toBe(422)
+    expect(fake.redis.keys('invite:')).toEqual([])
+  })
+
+  it("personalizes the email with the invitee's first name and the inviter's name and email", async () => {
+    const cookie = await signInInviter()
+    await profile(post({ firstName: 'Dana', lastName: 'Deacon' }, { cookie }))
+    await invite(cookie)
+    const sent = JSON.parse(fetchMock.mock.calls.at(-1)[1].body)
+    expect(sent.text).toMatch(/^Hi Nora,/)
+    expect(sent.text).toContain(`Dana Deacon (${INVITER})`)
+    expect(sent.subject).toContain('Dana Deacon')
+  })
+
+  it('escapes names in the HTML email', async () => {
+    const cookie = await signInInviter()
+    await invite(cookie, NEWBIE, { firstName: '<b>x</b>' })
+    const sent = JSON.parse(fetchMock.mock.calls.at(-1)[1].body)
+    expect(sent.html).toContain('&lt;b&gt;x&lt;/b&gt;')
+    expect(sent.html).not.toContain('<b>x</b>')
+  })
+
+  it('keeps an invited record after the invite link expires, and re-inviting updates the names', async () => {
+    vi.useFakeTimers()
+    const cookie = await signInInviter()
+    await invite(cookie)
+    vi.advanceTimersByTime(49 * 3600_000)
+    const user = await fake.redis.get(`user:${NEWBIE}`)
+    expect(user).toMatchObject({ status: 'invited', firstName: 'Nora', lastName: 'Newman', invitedBy: INVITER })
+    expect(fake.redis.ttl(`user:${NEWBIE}`)).toBeNull()
+
+    const fresh = await signInInviter() // the first session idled out during the 49 hours
+    expect((await invite(fresh, NEWBIE, { firstName: 'Norah' })).res.statusCode).toBe(200)
+    expect((await fake.redis.get(`user:${NEWBIE}`)).firstName).toBe('Norah')
+  })
 })
 
 describe('register', () => {
@@ -150,7 +190,7 @@ describe('register', () => {
     const res = await register(post({ inviteToken: token, email: NEWBIE }))
     expect(json(res)).toEqual({ pending: true, email: NEWBIE, emailSent: true })
     expect(res.headers['Set-Cookie']).toBeUndefined()
-    expect((await fake.redis.get(`user:${NEWBIE}`)).status).toBe('pending')
+    expect(await fake.redis.get(`user:${NEWBIE}`)).toMatchObject({ status: 'pending', firstName: 'Nora', lastName: 'Newman' })
     const sent = JSON.parse(fetchMock.mock.calls.at(-1)[1].body)
     expect(sent.text).toMatch(/https:\/\/ogc\.example\.com\/verify\?token=/)
   })
@@ -292,7 +332,39 @@ describe('session lifetime', () => {
   it('reports canInvite for inviters only', async () => {
     const cookie = await signInInviter()
     const res = await session({ httpMethod: 'GET', headers: { cookie } })
-    expect(json(res)).toEqual({ authenticated: true, email: INVITER, canInvite: true })
+    expect(json(res)).toMatchObject({ authenticated: true, email: INVITER, canInvite: true })
+  })
+
+  it('a new account needs a profile review; saving it clears the flag and sets the name', async () => {
+    const { token } = await invite(await signInInviter())
+    await register(post({ inviteToken: token, email: NEWBIE }))
+    const v = await verifyEmail(post({ token: tokenFromLastEmail(fetchMock, 'verify') }))
+    expect(json(v)).toMatchObject({ name: 'Nora Newman', firstName: 'Nora', needsProfile: true, canChangeEmail: true })
+    const cookie = sessionCookie(v)
+    const saved = await profile(post({ firstName: ' Norah ', lastName: 'Newman-Smith' }, { cookie }))
+    expect(json(saved)).toMatchObject({ name: 'Norah Newman-Smith', needsProfile: false })
+    const s = json(await session({ httpMethod: 'GET', headers: { cookie } }))
+    expect(s).toMatchObject({ name: 'Norah Newman-Smith', needsProfile: false })
+  })
+
+  it('profile requires a session (401) and both names (422)', async () => {
+    expect((await profile(post({ firstName: 'A', lastName: 'B' }))).statusCode).toBe(401)
+    const cookie = await signInInviter()
+    expect((await profile(post({ firstName: 'A', lastName: '' }, { cookie }))).statusCode).toBe(422)
+  })
+
+  it('falls back to the email as the name when none is set', async () => {
+    const cookie = await signInInviter()
+    expect(json(await session({ httpMethod: 'GET', headers: { cookie } })).name).toBe(INVITER)
+  })
+
+  it('records the last successful login and how it happened', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-10T12:00:00Z'))
+    await signInInviter()
+    expect(await fake.redis.get(`user:${INVITER}`)).toMatchObject({ lastLoginAt: Date.parse('2026-11-10T12:00:00Z'), lastLoginMethod: 'email' })
+    await login(post({ googleCredential: `google:${INVITER}` }))
+    expect((await fake.redis.get(`user:${INVITER}`)).lastLoginMethod).toBe('google')
   })
 
   it('logout ends the session', async () => {
@@ -347,11 +419,30 @@ describe('security review regressions', () => {
     expect((await login(post({ googleCredential: `google:${INVITER}` }))).statusCode).toBe(403)
   })
 
-  it('pending accounts expire with the confirmation window; activation makes them permanent', async () => {
+  it('pending accounts persist (for the Users tray) but the confirmation link still expires in 24 hours', async () => {
+    vi.useFakeTimers()
     const verifyToken = await activeNewbie()
-    expect(fake.redis.ttl(`user:${NEWBIE}`)).toBe(24 * 3600)
-    await verifyEmail(post({ token: verifyToken }))
     expect(fake.redis.ttl(`user:${NEWBIE}`)).toBeNull()
+    vi.advanceTimersByTime(24 * 3600_000 + 1000)
+    expect((await verifyEmail(post({ token: verifyToken }))).statusCode).toBe(410)
+    expect((await fake.redis.get(`user:${NEWBIE}`)).status).toBe('pending')
+  })
+
+  it('an inviter who was also sent an invite can still bootstrap-sign-in', async () => {
+    const cookie = await signInInviter()
+    await invite(cookie, 'other.inviter@example.com', { firstName: 'Olive', lastName: 'Other' })
+    await login(post({ email: 'other.inviter@example.com' }))
+    const res = await login(post({ loginToken: tokenFromLastEmail(fetchMock, 'login') }))
+    expect(res.statusCode).toBe(200)
+    expect(json(res)).toMatchObject({ name: 'Olive Other', canInvite: true })
+  })
+
+  it('an invited (not yet registered) account cannot sign in', async () => {
+    await invite(await signInInviter())
+    const before = fetchMock.mock.calls.length
+    await login(post({ email: NEWBIE }))
+    expect(fetchMock.mock.calls.length).toBe(before)
+    expect((await login(post({ googleCredential: `google:${NEWBIE}` }))).statusCode).toBe(403)
   })
 
   it('rejects display-name and quoted email syntax', async () => {

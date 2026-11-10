@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -9,7 +9,6 @@ const TEST_STAFF = vi.hoisted(() => [
 
 vi.mock('../config/staff.js', () => ({
   STAFF: TEST_STAFF,
-  findStaff: (name) => TEST_STAFF.find((s) => s.name === name) ?? null,
 }))
 
 const asana = vi.hoisted(() => ({ createTask: vi.fn(), attachFile: vi.fn() }))
@@ -23,6 +22,10 @@ const authApi = vi.hoisted(() => ({
   redeemLoginLink: vi.fn(),
   registerWithEmail: vi.fn(),
   createInvite: vi.fn(),
+  listUsers: vi.fn(),
+  saveProfile: vi.fn(),
+  requestEmailChange: vi.fn(),
+  confirmEmailChange: vi.fn(),
 }))
 vi.mock('../lib/auth.js', async (importOriginal) => ({ ...(await importOriginal()), ...authApi }))
 
@@ -56,16 +59,21 @@ function fetchSequence(...payloads) {
   })
 }
 
-const MEMBER = { authenticated: true, email: 'one@example.com', canInvite: false }
-const INVITER = { authenticated: true, email: 'deacon@example.com', canInvite: true }
+const MEMBER = {
+  authenticated: true, email: 'one@example.com', name: 'Mary Member', firstName: 'Mary', lastName: 'Member',
+  canInvite: false, canChangeEmail: true, needsProfile: false,
+}
+const INVITER = {
+  authenticated: true, email: 'deacon@example.com', name: 'Dana Deacon', firstName: 'Dana', lastName: 'Deacon',
+  canInvite: true, canChangeEmail: false, needsProfile: false,
+}
 
 function authenticate(session = MEMBER) {
   authApi.getSession.mockResolvedValue(session)
 }
 
 async function submitForm() {
-  await userEvent.selectOptions(await screen.findByLabelText(/your name/i), 'Test User One')
-  await userEvent.type(screen.getByLabelText(/request title/i), 'Heater')
+  await userEvent.type(await screen.findByLabelText(/request title/i), 'Heater')
   await userEvent.type(screen.getByLabelText(/request details/i), 'Broken heater')
   await userEvent.click(screen.getByRole('button', { name: /submit request/i }))
 }
@@ -82,7 +90,7 @@ describe('App — auth gating', () => {
     render(<App />)
     expect(await screen.findByLabelText(/email/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /sign-in link/i })).toBeInTheDocument()
-    expect(screen.queryByLabelText(/your name/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/request title/i)).not.toBeInTheDocument()
   })
 
   it('shows the sign-in screen when the session check fails', async () => {
@@ -91,18 +99,19 @@ describe('App — auth gating', () => {
     expect(await screen.findByRole('button', { name: /sign-in link/i })).toBeInTheDocument()
   })
 
-  it('shows the form, the email, and Sign out when signed in', async () => {
+  it("shows the form, the account's name, and Sign out when signed in", async () => {
     authenticate()
     render(<App />)
-    expect(await screen.findByLabelText(/your name/i)).toBeInTheDocument()
-    expect(screen.getByText('one@example.com')).toBeInTheDocument()
+    expect(await screen.findByLabelText(/request title/i)).toBeInTheDocument()
+    expect(screen.getByText('Mary Member')).toHaveAttribute('title', 'one@example.com')
+    expect(screen.queryByLabelText(/your name/i)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument()
   })
 
   it('keeps no auth state in localStorage (session is an HttpOnly cookie)', async () => {
     authenticate()
     render(<App />)
-    await screen.findByLabelText(/your name/i)
+    await screen.findByLabelText(/request title/i)
     expect(localStorage.getItem('ogc_auth')).toBeNull()
     expect(Object.keys(localStorage).filter((k) => /auth|token|session/i.test(k))).toEqual([])
   })
@@ -120,7 +129,7 @@ describe('App — auth gating', () => {
     render(<App />)
     await userEvent.click(await screen.findByRole('button', { name: 'Google' }))
     expect(authApi.signInWithGoogle).toHaveBeenCalledWith('google-cred')
-    expect(await screen.findByLabelText(/your name/i)).toBeInTheDocument()
+    expect(await screen.findByLabelText(/request title/i)).toBeInTheDocument()
   })
 })
 
@@ -132,7 +141,7 @@ describe('App — session expiry (30-min idle)', () => {
     await submitForm()
 
     expect(await screen.findByText(/session expired/i)).toBeInTheDocument()
-    expect(screen.queryByLabelText(/your name/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/request title/i)).not.toBeInTheDocument()
 
     authApi.signInWithGoogle.mockResolvedValue(MEMBER)
     await userEvent.click(screen.getByRole('button', { name: 'Google' }))
@@ -184,7 +193,7 @@ describe('App — emailed-link routes', () => {
     await userEvent.click(screen.getByRole('button', { name: /^register$/i }))
     expect(authApi.registerWithEmail).toHaveBeenCalledWith('abc123', 'new@example.com')
     expect(await screen.findByText(/we sent a confirmation email to/i)).toBeInTheDocument()
-    expect(screen.queryByLabelText(/your name/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/request title/i)).not.toBeInTheDocument()
   })
 
   it('/invite shows the server error for a mismatched email', async () => {
@@ -204,7 +213,7 @@ describe('App — emailed-link routes', () => {
     expect(authApi.confirmEmail).not.toHaveBeenCalled() // a link-scanner page load must not consume it
     await userEvent.click(btn)
     expect(authApi.confirmEmail).toHaveBeenCalledWith('vtok')
-    expect(await screen.findByLabelText(/your name/i)).toBeInTheDocument()
+    expect(await screen.findByLabelText(/request title/i)).toBeInTheDocument()
   })
 
   it('/login redeems the magic link on click', async () => {
@@ -213,7 +222,7 @@ describe('App — emailed-link routes', () => {
     render(<App />)
     await userEvent.click(await screen.findByRole('button', { name: /^sign in$/i }))
     expect(authApi.redeemLoginLink).toHaveBeenCalledWith('ltok')
-    expect(await screen.findByLabelText(/your name/i)).toBeInTheDocument()
+    expect(await screen.findByLabelText(/request title/i)).toBeInTheDocument()
   })
 })
 
@@ -221,7 +230,7 @@ describe('App — invites', () => {
   it('hides the Invite button from non-inviters', async () => {
     authenticate(MEMBER)
     render(<App />)
-    await screen.findByLabelText(/your name/i)
+    await screen.findByLabelText(/request title/i)
     expect(screen.queryByRole('button', { name: /^invite$/i })).not.toBeInTheDocument()
   })
 
@@ -234,10 +243,12 @@ describe('App — invites', () => {
     render(<App />)
 
     await userEvent.click(await screen.findByRole('button', { name: /^invite$/i }))
+    await userEvent.type(screen.getByLabelText(/first name/i), 'Nora')
+    await userEvent.type(screen.getByLabelText(/last name/i), 'Newman')
     await userEvent.type(screen.getByLabelText(/their email/i), 'new@example.com')
     await userEvent.click(screen.getByRole('button', { name: /create invite/i }))
 
-    expect(authApi.createInvite).toHaveBeenCalledWith('new@example.com', true)
+    expect(authApi.createInvite).toHaveBeenCalledWith({ email: 'new@example.com', firstName: 'Nora', lastName: 'Newman', sendEmail: true })
     expect(await screen.findByLabelText(/invite link/i)).toHaveValue(link)
     expect(screen.getByText(/invite emailed to/i)).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: /^copy$/i }))
@@ -250,10 +261,12 @@ describe('App — invites', () => {
     authApi.createInvite.mockResolvedValue({ link: 'https://x/invite?token=y', expiresAt: Date.now() + 1, emailSent: false })
     render(<App />)
     await userEvent.click(await screen.findByRole('button', { name: /^invite$/i }))
+    await userEvent.type(screen.getByLabelText(/first name/i), 'Nora')
+    await userEvent.type(screen.getByLabelText(/last name/i), 'Newman')
     await userEvent.type(screen.getByLabelText(/their email/i), 'new@example.com')
     await userEvent.click(screen.getByLabelText(/email the invite/i))
     await userEvent.click(screen.getByRole('button', { name: /create invite/i }))
-    expect(authApi.createInvite).toHaveBeenCalledWith('new@example.com', false)
+    expect(authApi.createInvite).toHaveBeenCalledWith({ email: 'new@example.com', firstName: 'Nora', lastName: 'Newman', sendEmail: false })
     expect(await screen.findByText(/send it however you like/i)).toBeInTheDocument()
   })
 })
@@ -300,14 +313,19 @@ describe('App — confirm flow (T1)', () => {
 
   it('creates the task and shows the success screen', async () => {
     authenticate()
-    asana.createTask.mockResolvedValue({ data: { gid: '1', name: 'Heater', permalink_url: 'http://x' } })
+    asana.createTask.mockResolvedValue({ data: { gid: '1', name: 'Heater', permalink_url: 'http://x' }, emailSent: true })
     await reachSummary()
 
     await userEvent.click(screen.getByRole('button', { name: /confirm & send/i }))
 
     await waitFor(() => expect(screen.getByText(/request sent to the deacons/i)).toBeInTheDocument())
     expect(asana.createTask).toHaveBeenCalledOnce()
+    expect(asana.createTask.mock.calls[0][0]).toMatchObject({ submitterName: 'Mary Member', submitterEmail: 'one@example.com' })
+    expect(asana.createTask.mock.calls[0][0]).not.toHaveProperty('followerGid')
     expect(asana.attachFile).not.toHaveBeenCalled()
+    expect(screen.getByRole('link', { name: /open the task in asana/i })).toHaveAttribute('href', 'http://x')
+    expect(screen.getByText(/free Asana account/i)).toBeInTheDocument()
+    expect(screen.getByText(/emailed you this link/i)).toBeInTheDocument()
   })
 
   it('does not create duplicate tasks on a double-click (in-flight guard)', async () => {
@@ -344,8 +362,7 @@ describe('App — confirm flow (T1)', () => {
     render(<App />)
 
     // Attach a file before submitting so the confirm path calls attachFile.
-    await userEvent.selectOptions(await screen.findByLabelText(/your name/i), 'Test User One')
-    await userEvent.type(screen.getByLabelText(/request title/i), 'Heater')
+    await userEvent.type(await screen.findByLabelText(/request title/i), 'Heater')
     await userEvent.type(screen.getByLabelText(/request details/i), 'Broken heater')
     await userEvent.upload(document.querySelector('input[type="file"]'), new File(['x'], 'doc.pdf', { type: 'application/pdf' }))
     await userEvent.click(screen.getByRole('button', { name: /submit request/i }))
@@ -356,5 +373,135 @@ describe('App — confirm flow (T1)', () => {
     await waitFor(() => expect(screen.getByText(/request sent to the deacons/i)).toBeInTheDocument())
     expect(asana.attachFile).toHaveBeenCalledOnce()
     expect(screen.getByText(/couldn’t be uploaded/i)).toBeInTheDocument()
+  })
+})
+
+describe('App — profile onboarding', () => {
+  it('a first sign-in shows the profile review, prefilled, before the form', async () => {
+    authenticate({ ...MEMBER, firstName: 'Mray', name: 'Mray Member', needsProfile: true })
+    authApi.saveProfile.mockResolvedValue(MEMBER)
+    render(<App />)
+    const first = await screen.findByLabelText(/first name/i)
+    expect(first).toHaveValue('Mray')
+    expect(screen.queryByLabelText(/request title/i)).not.toBeInTheDocument()
+
+    await userEvent.clear(first)
+    await userEvent.type(first, 'Mary')
+    await userEvent.click(screen.getByRole('button', { name: /save and continue/i }))
+    expect(authApi.saveProfile).toHaveBeenCalledWith('Mary', 'Member')
+    expect(await screen.findByLabelText(/request title/i)).toBeInTheDocument()
+    expect(screen.getByText('Mary Member')).toBeInTheDocument()
+  })
+
+  it('the Profile link reopens it, and Back returns to the form with the request intact', async () => {
+    authenticate()
+    render(<App />)
+    await userEvent.type(await screen.findByLabelText(/request title/i), 'Heater')
+    await userEvent.click(screen.getByRole('button', { name: /^profile$/i }))
+    expect(await screen.findByLabelText(/first name/i)).toHaveValue('Mary')
+    await userEvent.click(screen.getByRole('button', { name: /back to the request form/i }))
+    expect(await screen.findByLabelText(/request title/i)).toBeInTheDocument()
+  })
+
+  it('requests an email change, sending the confirmation to the current address', async () => {
+    authenticate()
+    authApi.requestEmailChange.mockResolvedValue({ sent: true, to: 'one@example.com' })
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: /^profile$/i }))
+    await userEvent.click(screen.getByRole('button', { name: /use a different email/i }))
+    await userEvent.type(screen.getByLabelText(/^new email/i), 'new@example.com')
+    await userEvent.type(screen.getByLabelText(/confirm new email/i), 'new@example.com')
+    await userEvent.click(screen.getByRole('button', { name: /send confirmation/i }))
+    expect(authApi.requestEmailChange).toHaveBeenCalledWith('new@example.com')
+    expect(await screen.findByRole('status')).toHaveTextContent(/current address, one@example.com/i)
+  })
+
+  it('blocks an email change when the two addresses do not match', async () => {
+    authenticate()
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: /^profile$/i }))
+    await userEvent.click(screen.getByRole('button', { name: /use a different email/i }))
+    await userEvent.type(screen.getByLabelText(/^new email/i), 'new@example.com')
+    await userEvent.type(screen.getByLabelText(/confirm new email/i), 'nwe@example.com')
+    await userEvent.click(screen.getByRole('button', { name: /send confirmation/i }))
+    expect(authApi.requestEmailChange).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/don’t match/i)
+  })
+
+  it('hides email change for Google accounts and inviters', async () => {
+    authenticate({ ...MEMBER, canChangeEmail: false })
+    const { unmount } = render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: /^profile$/i }))
+    expect(screen.queryByRole('button', { name: /use a different email/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/sign in with Google/i)).toBeInTheDocument()
+    unmount()
+
+    authenticate(INVITER)
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: /^profile$/i }))
+    expect(screen.queryByRole('button', { name: /use a different email/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/site configuration/i)).toBeInTheDocument()
+  })
+
+  it('/email-change (old inbox) approves on click and says a link went to the new address', async () => {
+    window.history.replaceState(null, '', '/email-change?token=etok')
+    authApi.confirmEmailChange.mockResolvedValue({ approved: true, sentTo: 'new@example.com' })
+    render(<App />)
+    const btn = await screen.findByRole('button', { name: /yes, i requested this/i })
+    expect(authApi.confirmEmailChange).not.toHaveBeenCalled()
+    await userEvent.click(btn)
+    expect(authApi.confirmEmailChange).toHaveBeenCalledWith('etok')
+    expect(await screen.findByRole('status')).toHaveTextContent(/new address, new@example.com/i)
+    expect(screen.queryByLabelText(/request title/i)).not.toBeInTheDocument()
+    expect(window.location.pathname).toBe('/')
+  })
+
+  it('/email-change-verify (new inbox) confirms on click and signs in as the new address', async () => {
+    window.history.replaceState(null, '', '/email-change-verify?token=vtok')
+    authApi.confirmEmailChange.mockResolvedValue({ ...MEMBER, email: 'new@example.com' })
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: /confirm this address/i }))
+    expect(authApi.confirmEmailChange).toHaveBeenCalledWith('vtok')
+    expect(await screen.findByLabelText(/request title/i)).toBeInTheDocument()
+  })
+})
+
+describe('App — users tray', () => {
+  it('is only offered to inviters', async () => {
+    authenticate(MEMBER)
+    render(<App />)
+    await screen.findByLabelText(/request title/i)
+    expect(screen.queryByRole('button', { name: /^users$/i })).not.toBeInTheDocument()
+  })
+
+  it('lists users with invite, acceptance, and last-login dates ("Never" when missing)', async () => {
+    authenticate(INVITER)
+    authApi.listUsers.mockResolvedValue({
+      users: [
+        { email: 'deacon@example.com', name: 'Dana Deacon', status: 'active', invitedAt: null, invitedBy: null, acceptedAt: Date.UTC(2026, 10, 1), lastLoginAt: Date.UTC(2026, 10, 9) },
+        { email: 'ivy@example.com', name: 'Ivy Invited', status: 'invited', invitedAt: Date.UTC(2026, 10, 8), invitedBy: 'Dana Deacon', acceptedAt: null, lastLoginAt: null },
+      ],
+    })
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: /^users$/i }))
+    const tray = await screen.findByRole('dialog', { name: /users/i })
+    expect(await screen.findByText('Ivy Invited')).toBeInTheDocument()
+    const ivy = screen.getByText('Ivy Invited').closest('li')
+    expect(ivy).toHaveTextContent(/Invited/)
+    expect(ivy).toHaveTextContent(/by Dana Deacon/)
+    expect(ivy.textContent.match(/Never/g)).toHaveLength(2) // accepted + last login
+    const dana = within(tray).getByText('Dana Deacon').closest('li')
+    expect(dana).not.toHaveTextContent(/Never/)
+
+    await userEvent.keyboard('{Escape}')
+    expect(tray).not.toBeInTheDocument()
+  })
+
+  it('a 401 while loading drops to sign-in', async () => {
+    authenticate(INVITER)
+    authApi.listUsers.mockRejectedValue(Object.assign(new Error('expired'), { status: 401 }))
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: /^users$/i }))
+    expect(await screen.findByRole('button', { name: /sign-in link/i })).toBeInTheDocument()
   })
 })
